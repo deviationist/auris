@@ -1,0 +1,8 @@
+trym ALL=(ALL) NOPASSWD: /usr/bin/systemctl start auris-capture, \
+                             /usr/bin/systemctl stop auris-capture, \
+                             /usr/bin/systemctl restart auris-capture, \
+                             /usr/bin/systemctl is-active auris-capture, \
+                             /usr/bin/systemctl daemon-reload, \
+                             /usr/bin/amixer -c *, \
+                             /usr/bin/arecord -l, \
+                             /usr/bin/tee /etc/default/auris

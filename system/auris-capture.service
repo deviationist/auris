@@ -1,0 +1,12 @@
+[Unit]
+Description=Auris audio capture (stream and/or record)
+After=network.target icecast2.service
+
+[Service]
+Type=simple
+ExecStart=/opt/auris/capture.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
