@@ -18,7 +18,19 @@ import {
   Sun,
   Moon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   Card,
   CardContent,
@@ -296,9 +308,12 @@ export default function Home() {
           setPlayingFile(null);
         }
         await fetchRecordings();
+        toast.success("Recording deleted");
+      } else {
+        toast.error("Failed to delete recording");
       }
     } catch {
-      // ignore
+      toast.error("Failed to delete recording");
     }
   }
 
@@ -512,21 +527,54 @@ export default function Home() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button
-                onClick={toggleRecord}
-                disabled={recordLoading}
-                variant={status.recording ? "destructive" : "default"}
-                className="w-full"
-              >
-                {recordLoading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : status.recording ? (
-                  <Square className="mr-2 h-4 w-4" />
-                ) : (
-                  <Circle className="mr-2 h-4 w-4 fill-red-500 text-red-500" />
-                )}
-                {status.recording ? "Stop Recording" : "Start Recording"}
-              </Button>
+              {status.recording ? (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      disabled={recordLoading}
+                      variant="destructive"
+                      className="w-full"
+                    >
+                      {recordLoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Square className="mr-2 h-4 w-4" />
+                      )}
+                      Stop Recording
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Stop recording?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will stop the current recording and finalize the file.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        variant="destructive"
+                        onClick={toggleRecord}
+                      >
+                        Stop Recording
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              ) : (
+                <Button
+                  onClick={toggleRecord}
+                  disabled={recordLoading}
+                  className="w-full"
+                >
+                  {recordLoading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Circle className="mr-2 h-4 w-4 fill-red-500 text-red-500" />
+                  )}
+                  Start Recording
+                </Button>
+              )}
               {status.recording && status.recording_file && (
                 <p className="text-xs text-muted-foreground font-mono truncate" role="status">
                   Recording to: {status.recording_file}
@@ -764,16 +812,36 @@ export default function Home() {
                               <Download className="h-4 w-4" aria-hidden="true" />
                             </a>
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-9 w-9"
-                            onClick={() => deleteRecording(rec.filename)}
-                            disabled={isActive}
-                            aria-label="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" aria-hidden="true" />
-                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9"
+                                disabled={isActive}
+                                aria-label="Delete"
+                              >
+                                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete recording?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will permanently delete <span className="font-mono font-medium">{rec.filename}</span>. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  variant="destructive"
+                                  onClick={() => deleteRecording(rec.filename)}
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </div>
                       </TableCell>
                     </TableRow>
