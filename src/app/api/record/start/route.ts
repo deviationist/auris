@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { setCaptureMode, getSelectedDevice } from "@/lib/device-config";
+import { listCaptureDevices } from "@/lib/alsa";
 import { isActive, startUnit, restartUnit } from "@/lib/systemctl";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
@@ -10,7 +11,9 @@ const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
 
 export async function POST() {
   try {
-    const device = await getSelectedDevice();
+    const alsaId = await getSelectedDevice();
+    const devices = await listCaptureDevices();
+    const deviceName = devices.find((d) => d.alsaId === alsaId)?.name || alsaId;
     await setCaptureMode({ record: true });
 
     const active = await isActive("auris-capture");
@@ -41,7 +44,7 @@ export async function POST() {
         .insert(recordings)
         .values({
           filename,
-          device,
+          device: deviceName,
           createdAt: new Date(),
         })
         .onConflictDoNothing();
