@@ -794,24 +794,34 @@ export default function Home() {
                               aria-hidden="true"
                             />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-9 w-9"
-                            disabled={isActive}
-                            aria-label="Download"
-                            asChild
-                          >
-                            <a
-                              href={`/api/recordings/${encodeURIComponent(
-                                rec.filename
-                              )}`}
-                              download
-                              tabIndex={isActive ? -1 : undefined}
+                          {isActive ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-9 w-9"
+                              disabled
+                              aria-label="Download"
                             >
                               <Download className="h-4 w-4" aria-hidden="true" />
-                            </a>
-                          </Button>
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-9 w-9"
+                              aria-label="Download"
+                              asChild
+                            >
+                              <a
+                                href={`/api/recordings/${encodeURIComponent(
+                                  rec.filename
+                                )}`}
+                                download
+                              >
+                                <Download className="h-4 w-4" aria-hidden="true" />
+                              </a>
+                            </Button>
+                          )}
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <Button

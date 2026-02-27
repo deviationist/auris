@@ -7,7 +7,7 @@ Web-based audio monitoring and recording app. Streams live audio via Icecast2 an
 ```
 Browser (React/Next.js)
   ↕ API routes
-Next.js (port 3000) ──rewrite /stream/*──→ Icecast2 (port 8000, localhost)
+Next.js (port 3075) ──rewrite /stream/*──→ Icecast2 (port 8000, localhost)
   ↕ sudo systemctl                            ↑
 systemd: auris-capture                    ffmpeg (ALSA → MP3)
   → capture.sh (reads /etc/default/auris)    ↑
@@ -18,7 +18,7 @@ A single `auris-capture` service runs one ffmpeg process. State flags in `/etc/d
 
 ## Tech Stack
 
-- **Frontend:** React 19, TypeScript, Tailwind CSS 4, shadcn/ui (Radix), next-themes (dark/light mode)
+- **Frontend:** React 19, TypeScript, Tailwind CSS 4, shadcn/ui (Radix), sonner (toasts), next-themes (dark/light mode)
 - **Backend:** Next.js 16 App Router API routes
 - **Database:** SQLite (better-sqlite3) with Drizzle ORM — stores recording metadata
 - **Audio:** ffmpeg (ALSA capture, libmp3lame encoding), Icecast2 (streaming)

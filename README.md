@@ -5,7 +5,7 @@ Audio monitoring and recording web application. Streams live audio via Icecast2 
 ## Architecture
 
 ```
-Browser  ──>  Nginx (:80)  ──>  Next.js (:3000)   ── API ──>  systemctl start/stop
+Browser  ──>  Nginx (:80)  ──>  Next.js (:3075)   ── API ──>  systemctl start/stop
                    │                  │                              │
                    │                  │ SQLite DB               auris-capture
                    │                  │ (recording metadata)    (single ffmpeg process)
@@ -149,7 +149,7 @@ Add the hostname to DNS or `/etc/hosts` on machines that need to reach it:
 192.168.x.x  mic.trym
 ```
 
-Without Nginx, the app is available directly at `http://<server>:3000`.
+Without Nginx, the app is available directly at `http://<server>:3075`.
 
 ### 7. Verify
 
