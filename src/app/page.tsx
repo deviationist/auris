@@ -696,6 +696,7 @@ export default function Home() {
                     <TableHead className="w-28">Date</TableHead>
                     <TableHead className="w-20">Duration</TableHead>
                     <TableHead className="w-20">Size</TableHead>
+                    <TableHead>Device</TableHead>
                     <TableHead className="w-32 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -706,16 +707,7 @@ export default function Home() {
                     <TableRow key={rec.filename} className={isActive ? "bg-red-500/10" : ""}>
                       <TableCell className="font-mono text-sm">
                         <span className="flex items-center gap-2">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span>{rec.filename}</span>
-                            </TooltipTrigger>
-                            {rec.device && (
-                              <TooltipContent>
-                                <p>Device: {rec.device}</p>
-                              </TooltipContent>
-                            )}
-                          </Tooltip>
+                          <span>{rec.filename}</span>
                           {isActive && (
                             <Badge variant="secondary" className="bg-red-600 hover:bg-red-600 text-white text-xs animate-pulse">
                               <Circle className="mr-1 h-2 w-2 fill-current" aria-hidden="true" /> REC
@@ -731,6 +723,9 @@ export default function Home() {
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {isActive ? "-" : formatBytes(rec.size)}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {rec.device || "-"}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
