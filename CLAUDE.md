@@ -31,13 +31,16 @@ A single `auris-capture` service runs one ffmpeg process. State flags in `/etc/d
 |------|---------|
 | `src/app/page.tsx` | Main dashboard UI (all state, controls, recordings) |
 | `src/components/level-meter.tsx` | WebAudio RMS/dB level meter |
+| `src/components/waveform-player.tsx` | Canvas waveform player with seek, play/pause, level meter |
 | `src/lib/systemctl.ts` | Start/stop/restart systemd units via sudo |
 | `src/lib/alsa.ts` | ALSA device enumeration & mixer control |
 | `src/lib/device-config.ts` | Persist selected ALSA device to `/etc/default/auris` |
+| `src/lib/waveform.ts` | Shared waveform generation (ffmpeg PCM → peaks JSON) |
 | `src/lib/db/schema.ts` | Drizzle ORM schema (recordings table) |
 | `src/lib/db/index.ts` | DB singleton, auto-migration, disk→DB sync |
 | `drizzle.config.ts` | Drizzle Kit config for migrations |
 | `capture.sh` | ffmpeg capture script (reads `/etc/default/auris`) |
+| `scripts/generate-waveforms.mjs` | CLI: generate waveform cache for all recordings |
 | `src/app/api/` | All API routes (status, stream, record, audio, recordings) |
 | `system/` | systemd unit, icecast.xml, nginx config, sudoers |
 | `next.config.ts` | Rewrites `/stream/*` → Icecast localhost:8000 |
@@ -45,10 +48,13 @@ A single `auris-capture` service runs one ffmpeg process. State flags in `/etc/d
 ## Development
 
 ```bash
-npm run dev      # Start dev server (port 3000)
-npm run build    # Production build
-npm run start    # Production server
-npm run db:generate  # Generate DB migrations after schema changes
+npm run dev                # Start dev server (port 3000)
+npm run build              # Production build
+npm run start              # Production server
+npm run stop               # Kill process on port 3000
+npm run db:generate        # Generate DB migrations after schema changes
+npm run waveforms:generate    # Generate missing waveform cache files
+npm run waveforms:regenerate  # Regenerate all waveform cache files
 ```
 
 Requires Icecast2 running on localhost:8000 for streaming features.

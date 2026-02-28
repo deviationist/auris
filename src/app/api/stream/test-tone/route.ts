@@ -23,6 +23,14 @@ async function waitForMount(
   return false;
 }
 
+export async function DELETE() {
+  if (toneProcess && toneProcess.exitCode === null) {
+    toneProcess.kill();
+    toneProcess = null;
+  }
+  return NextResponse.json({ ok: true });
+}
+
 export async function POST() {
   try {
     const active = await isActive("auris-capture");
@@ -43,7 +51,8 @@ export async function POST() {
     toneProcess = spawn("ffmpeg", [
       "-re",
       "-f", "lavfi",
-      "-i", "sine=frequency=440:duration=3",
+      "-i", "sine=frequency=440:duration=5",
+      "-af", "volume=0.35",
       "-acodec", "libmp3lame",
       "-ab", "128k",
       "-ar", "44100",

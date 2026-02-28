@@ -89,6 +89,10 @@ export async function DELETE(
   try {
     await unlink(filePath);
 
+    // Remove waveform cache
+    const waveformPath = join(RECORDINGS_DIR, `${safe}.waveform.json`);
+    try { await unlink(waveformPath); } catch { /* may not exist */ }
+
     // Remove from DB
     const db = getDb();
     await db.delete(recordings).where(eq(recordings.filename, safe));

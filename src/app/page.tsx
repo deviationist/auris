@@ -56,6 +56,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { LevelMeter } from "@/components/level-meter";
+import { WaveformPlayer } from "@/components/waveform-player";
 import {
   Tooltip,
   TooltipContent,
@@ -137,30 +138,6 @@ function formatDate(ms: number): string {
   });
 }
 
-function PlaybackPlayer({ src, onEnded }: { src: string; onEnded: () => void }) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.src = src;
-    audio.load();
-    audio.play().catch(() => {});
-  }, [src]);
-
-  return (
-    <div className="space-y-2">
-      <audio
-        ref={audioRef}
-        controls
-        onEnded={onEnded}
-        className="w-full"
-        aria-label="Recording playback"
-      />
-      <LevelMeter audioElement={audioRef.current} active />
-    </div>
-  );
-}
 
 export default function Home() {
   const { theme, setTheme } = useTheme();
@@ -186,6 +163,11 @@ export default function Home() {
   const [recordElapsed, setRecordElapsed] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const listenInitiatedStreamRef = useRef(false);
+  const listenAbortRef = useRef<AbortController | null>(null);
+  const toneAbortRef = useRef<AbortController | null>(null);
+  const toneCleanupRef = useRef<(() => void) | null>(null);
+  const toneTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingStopRef = useRef<Promise<void> | null>(null);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -269,30 +251,56 @@ export default function Home() {
     };
   }, [status.recording]);
 
-  async function waitForStream(timeoutMs: number): Promise<boolean> {
+  function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+  }
+
+  async function waitForStream(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
+      if (signal?.aborted) return false;
       try {
-        const res = await fetch("/api/status");
+        const res = await fetch("/api/status", { signal });
         if (res.ok) {
           const s = await res.json();
           if (s.streaming) return true;
         }
       } catch {
-        // not ready yet
+        if (signal?.aborted) return false;
       }
-      await new Promise((r) => setTimeout(r, 300));
+      await abortableSleep(300, signal);
     }
     return false;
   }
 
   async function startListening() {
+    const controller = new AbortController();
+    listenAbortRef.current = controller;
     setListenLoading(true);
     try {
-      if (!status.streaming) {
-        await fetch("/api/stream/start", { method: "POST" });
+      // Wait for any pending stop from a previous cancel
+      if (pendingStopRef.current) {
+        await pendingStopRef.current;
+        if (controller.signal.aborted) return;
+      }
+
+      // Fetch fresh status — React state may be stale after cancel
+      let streaming = status.streaming;
+      try {
+        const res = await fetch("/api/status", { signal: controller.signal });
+        if (res.ok) streaming = (await res.json()).streaming;
+      } catch {
+        if (controller.signal.aborted) return;
+      }
+
+      if (!streaming) {
+        await fetch("/api/stream/start", { method: "POST", signal: controller.signal });
         listenInitiatedStreamRef.current = true;
-        const ready = await waitForStream(5000);
+        const ready = await waitForStream(5000, controller.signal);
+        if (controller.signal.aborted) return;
         if (!ready) {
           toast.error("Stream failed to start");
           setListenLoading(false);
@@ -302,10 +310,26 @@ export default function Home() {
       } else {
         listenInitiatedStreamRef.current = false;
       }
+      if (controller.signal.aborted) return;
       connectLiveAudio();
     } catch {
-      toast.error("Failed to start listening");
-      setListenLoading(false);
+      if (!controller.signal.aborted) {
+        toast.error("Failed to start listening");
+        setListenLoading(false);
+      }
+    }
+  }
+
+  function cancelListening() {
+    listenAbortRef.current?.abort();
+    listenAbortRef.current = null;
+    disconnectLiveAudio();
+    if (listenInitiatedStreamRef.current) {
+      pendingStopRef.current = fetch("/api/stream/stop", { method: "POST" })
+        .then(() => {})
+        .catch(() => {})
+        .finally(() => { pendingStopRef.current = null; });
+      listenInitiatedStreamRef.current = false;
     }
   }
 
@@ -333,11 +357,15 @@ export default function Home() {
       await fetchRecordings();
       // Service restart kills the Icecast connection — reconnect if we were listening
       if (wasListening) {
+        const controller = new AbortController();
+        listenAbortRef.current = controller;
         setLiveConnected(false);
         setListenLoading(true);
         setListenReconnecting(true);
-        await waitForStream(5000);
-        connectLiveAudio();
+        await waitForStream(5000, controller.signal);
+        if (!controller.signal.aborted) {
+          connectLiveAudio();
+        }
       }
     } finally {
       setRecordLoading(false);
@@ -373,22 +401,43 @@ export default function Home() {
   }
 
   async function sendTestTone() {
+    const controller = new AbortController();
+    toneAbortRef.current = controller;
     setToneLoading(true);
-    if (liveConnected || status.streaming) {
+
+    // Wait for any pending stop from a previous cancel
+    if (pendingStopRef.current) {
+      await pendingStopRef.current;
+      if (controller.signal.aborted) return;
+    }
+
+    // Fetch fresh status — React state may be stale after cancel
+    let streaming = status.streaming;
+    try {
+      const res = await fetch("/api/status", { signal: controller.signal });
+      if (res.ok) streaming = (await res.json()).streaming;
+    } catch {
+      if (controller.signal.aborted) return;
+    }
+
+    if (liveConnected || streaming) {
       await stopListening();
       // Wait for the capture service to fully stop
       const start = Date.now();
       while (Date.now() - start < 3000) {
-        const res = await fetch("/api/status");
+        if (controller.signal.aborted) return;
+        const res = await fetch("/api/status", { signal: controller.signal });
         if (res.ok) {
           const s = await res.json();
           if (!s.streaming) break;
         }
-        await new Promise((r) => setTimeout(r, 300));
+        await abortableSleep(300, controller.signal);
       }
     }
+    if (controller.signal.aborted) return;
     try {
-      const res = await fetch("/api/stream/test-tone", { method: "POST" });
+      const res = await fetch("/api/stream/test-tone", { method: "POST", signal: controller.signal });
+      if (controller.signal.aborted) return;
       if (!res.ok) {
         setToneLoading(false);
         return;
@@ -400,20 +449,56 @@ export default function Home() {
         audio.src = `${streamUrl}?t=${Date.now()}`;
         audio.load();
         audio.play().catch(() => {});
+
+        const cleanup = () => {
+          toneCleanupRef.current = null;
+          audio.removeEventListener("ended", cleanup);
+          audio.removeEventListener("error", cleanup);
+          toneTimeoutRef.current = setTimeout(() => {
+            toneTimeoutRef.current = null;
+            setToneLoading(false);
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
+          }, 500);
+        };
+        toneCleanupRef.current = cleanup;
+        audio.addEventListener("ended", cleanup);
+        audio.addEventListener("error", cleanup);
       }
-      // Tone lasts ~3s, give extra buffer then clean up
-      setTimeout(() => {
-        setToneLoading(false);
-        const a = audioRef.current;
-        if (a) {
-          a.pause();
-          a.removeAttribute("src");
-          a.load();
-        }
-      }, 5000);
     } catch {
-      setToneLoading(false);
+      if (!controller.signal.aborted) {
+        setToneLoading(false);
+      }
     }
+  }
+
+  function cancelTestTone() {
+    toneAbortRef.current?.abort();
+    toneAbortRef.current = null;
+    if (toneTimeoutRef.current) {
+      clearTimeout(toneTimeoutRef.current);
+      toneTimeoutRef.current = null;
+    }
+    const audio = audioRef.current;
+    if (audio) {
+      // Remove listeners before clearing audio to prevent stale cleanup firing
+      const cleanup = toneCleanupRef.current;
+      if (cleanup) {
+        audio.removeEventListener("ended", cleanup);
+        audio.removeEventListener("error", cleanup);
+        toneCleanupRef.current = null;
+      }
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    }
+    setToneLoading(false);
+    // Kill the test tone process on the server
+    pendingStopRef.current = fetch("/api/stream/test-tone", { method: "DELETE" })
+      .then(() => {})
+      .catch(() => {})
+      .finally(() => { pendingStopRef.current = null; });
   }
 
   async function deleteRecording(filename: string) {
@@ -631,8 +716,8 @@ export default function Home() {
             </CardHeader>
             <CardContent className="space-y-3">
               <Button
-                onClick={liveConnected ? stopListening : startListening}
-                disabled={listenLoading || toneLoading}
+                onClick={listenLoading ? cancelListening : liveConnected ? stopListening : startListening}
+                disabled={toneLoading}
                 variant={liveConnected ? "destructive" : "outline"}
                 className="w-full"
               >
@@ -641,7 +726,7 @@ export default function Home() {
                 ) : (
                   <Volume2 className="mr-2 h-4 w-4" />
                 )}
-                {listenLoading ? (listenReconnecting ? "Reconnecting..." : "Connecting...") : liveConnected ? "Stop Listening" : "Listen"}
+                {listenLoading ? "Cancel" : liveConnected ? "Stop Listening" : "Listen"}
               </Button>
 
               <Tooltip>
@@ -650,8 +735,8 @@ export default function Home() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={sendTestTone}
-                      disabled={status.recording || toneLoading}
+                      onClick={toneLoading ? cancelTestTone : sendTestTone}
+                      disabled={status.recording || listenLoading}
                       className="w-full"
                     >
                       {toneLoading ? (
@@ -659,7 +744,7 @@ export default function Home() {
                       ) : (
                         <AudioWaveform className="mr-2 h-4 w-4" />
                       )}
-                      {toneLoading ? "Playing..." : "Test Tone"}
+                      {toneLoading ? "Cancel" : "Test Tone"}
                     </Button>
                   </span>
                 </TooltipTrigger>
@@ -887,16 +972,14 @@ export default function Home() {
                             className="h-9 w-9"
                             onClick={() => playRecording(rec.filename)}
                             disabled={isActive}
-                            aria-label={playingFile === rec.filename ? "Stop playing" : "Play"}
+                            aria-label={isPlaying ? "Stop playing" : "Play"}
+                            title={isPlaying ? "Stop playing" : "Play"}
                           >
-                            <Play
-                              className={`h-4 w-4 ${
-                                playingFile === rec.filename
-                                  ? "text-green-500"
-                                  : ""
-                              }`}
-                              aria-hidden="true"
-                            />
+                            {isPlaying ? (
+                              <Square className="h-4 w-4 text-green-500" aria-hidden="true" />
+                            ) : (
+                              <Play className="h-4 w-4" aria-hidden="true" />
+                            )}
                           </Button>
                           {isActive ? (
                             <Button
@@ -905,6 +988,7 @@ export default function Home() {
                               className="h-9 w-9"
                               disabled
                               aria-label="Download"
+                              title="Download"
                             >
                               <Download className="h-4 w-4" aria-hidden="true" />
                             </Button>
@@ -914,6 +998,7 @@ export default function Home() {
                               size="icon"
                               className="h-9 w-9"
                               aria-label="Download"
+                              title="Download"
                               asChild
                             >
                               <a
@@ -934,6 +1019,7 @@ export default function Home() {
                                 className="h-9 w-9"
                                 disabled={isActive}
                                 aria-label="Delete"
+                                title="Delete"
                               >
                                 <Trash2 className="h-4 w-4" aria-hidden="true" />
                               </Button>
@@ -962,8 +1048,9 @@ export default function Home() {
                     {isPlaying && (
                       <TableRow>
                         <TableCell colSpan={6} className="p-3">
-                          <PlaybackPlayer
+                          <WaveformPlayer
                             src={`/api/recordings/${encodeURIComponent(rec.filename)}`}
+                            waveformUrl={`/api/recordings/${encodeURIComponent(rec.filename)}/waveform`}
                             onEnded={() => setPlayingFile(null)}
                           />
                         </TableCell>

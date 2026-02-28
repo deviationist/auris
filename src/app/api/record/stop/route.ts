@@ -8,6 +8,7 @@ import { stat } from "fs/promises";
 import { join } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { generateWaveform } from "@/lib/waveform";
 
 const execFileAsync = promisify(execFile);
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
@@ -60,6 +61,9 @@ export async function POST() {
           .update(recordings)
           .set({ size: s.size, duration })
           .where(eq(recordings.filename, activeRec.filename));
+        // Fire-and-forget waveform generation
+        const cachePath = join(RECORDINGS_DIR, `${activeRec.filename}.waveform.json`);
+        generateWaveform(filePath, cachePath).catch(() => {});
       } catch {
         // ignore metadata update failure
       }

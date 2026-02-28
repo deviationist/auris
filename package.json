@@ -8,7 +8,10 @@
     "start": "next start",
     "setup": "./setup.sh",
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "waveforms:generate": "node --env-file=/etc/default/auris scripts/generate-waveforms.mjs",
+    "waveforms:regenerate": "node --env-file=/etc/default/auris scripts/generate-waveforms.mjs --force",
+    "stop": "ss -tlnp 'sport = :3000' | grep -oP 'pid=\\K[0-9]+' | xargs -r kill"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
