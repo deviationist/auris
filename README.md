@@ -7,15 +7,15 @@ Audio monitoring and recording web application. Streams live audio via Icecast2 
 ## Architecture
 
 ```
-Browser  ──>  Nginx (:80)  ──>  Next.js (:3075)   ── API ──>  systemctl start/stop
-                   │                  │                              │
-                   │                  │ SQLite DB               auris-capture
-                   │                  │ (recording metadata)    (single ffmpeg process)
-                   │                  │                              │
-                   └── /stream/ ──>  Icecast2 (:8000)  <────────────┘
-                                                                     │
-                                                               USB Microphone
-                                                              (ALSA capture)
+Browser  ──>  Nginx (:80/:443)  ──>  Next.js (:3075)   ── API ──>  systemctl start/stop
+                   │                     │                              │
+                   │                     │ SQLite DB               auris-capture
+                   │                     │ (recording metadata)    (single ffmpeg process)
+                   │                     │                              │
+                   └── /stream/ ───>  Icecast2 (:8000)  <───────────────┘
+                                                                        │
+                                                                  Audio Source
+                                                                 (ALSA capture)
 ```
 
 - **Next.js** (app router, TypeScript, Tailwind, shadcn/ui) — web UI + API routes
