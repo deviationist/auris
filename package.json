@@ -11,6 +11,7 @@
     "db:push": "drizzle-kit push",
     "waveforms:generate": "node --env-file=/etc/default/auris scripts/generate-waveforms.mjs",
     "waveforms:regenerate": "node --env-file=/etc/default/auris scripts/generate-waveforms.mjs --force",
+    "waveforms:clear": "node --env-file=/etc/default/auris scripts/generate-waveforms.mjs --clear",
     "stop": "ss -tlnp 'sport = :3000' | grep -oP 'pid=\\K[0-9]+' | xargs -r kill"
   },
   "dependencies": {

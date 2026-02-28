@@ -40,7 +40,7 @@ A single `auris-capture` service runs one ffmpeg process. State flags in `/etc/d
 | `src/lib/db/index.ts` | DB singleton, auto-migration, disk→DB sync |
 | `drizzle.config.ts` | Drizzle Kit config for migrations |
 | `capture.sh` | ffmpeg capture script (reads `/etc/default/auris`) |
-| `scripts/generate-waveforms.mjs` | CLI: generate waveform cache for all recordings |
+| `scripts/generate-waveforms.mjs` | CLI: generate/clear waveform data in DB |
 | `src/app/api/` | All API routes (status, stream, record, audio, recordings) |
 | `system/` | systemd unit, icecast.xml, nginx config, sudoers |
 | `next.config.ts` | Rewrites `/stream/*` → Icecast localhost:8000 |
@@ -53,8 +53,9 @@ npm run build              # Production build
 npm run start              # Production server
 npm run stop               # Kill process on port 3000
 npm run db:generate        # Generate DB migrations after schema changes
-npm run waveforms:generate    # Generate missing waveform cache files
-npm run waveforms:regenerate  # Regenerate all waveform cache files
+npm run waveforms:generate    # Generate missing waveforms
+npm run waveforms:regenerate  # Regenerate all waveforms
+npm run waveforms:clear       # Remove all waveforms from DB
 ```
 
 Requires Icecast2 running on localhost:8000 for streaming features.

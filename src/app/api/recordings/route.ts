@@ -36,6 +36,7 @@ export async function GET() {
           createdAt: row.createdAt.getTime(),
           duration: row.duration,
           device: row.device,
+          waveformHash: row.waveformHash ?? null,
         };
       })
     );

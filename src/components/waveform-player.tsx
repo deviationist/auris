@@ -25,12 +25,14 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
   const rafRef = useRef<number>(0);
   const peaksRef = useRef<number[] | null>(null);
 
+  const progressBarRef = useRef<HTMLDivElement>(null);
   const playedProbeRef = useRef<HTMLSpanElement>(null);
   const unplayedProbeRef = useRef<HTMLSpanElement>(null);
   const onEndedRef = useRef(onEnded);
   onEndedRef.current = onEnded;
 
   const [peaks, setPeaks] = useState<number[] | null>(null);
+  const [waveformLoaded, setWaveformLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
 
   // Resolve theme colors from hidden probe elements
@@ -124,6 +126,9 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
     const progress = audio.duration ? audio.currentTime / audio.duration : 0;
     updateTimeDisplay(audio.currentTime, audio.duration || 0);
     draw(progress);
+    if (progressBarRef.current) {
+      progressBarRef.current.style.width = `${progress * 100}%`;
+    }
 
     rafRef.current = requestAnimationFrame(animate);
   }, [draw, updateTimeDisplay]);
@@ -139,9 +144,12 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
       .then((data: number[]) => {
         peaksRef.current = data;
         setPeaks(data);
+        setWaveformLoaded(true);
         draw(0);
       })
-      .catch(() => {});
+      .catch(() => {
+        setWaveformLoaded(true);
+      });
 
     return () => controller.abort();
   }, [waveformUrl, draw]);
@@ -225,12 +233,12 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
     }
   };
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleCanvasClick = (e: React.MouseEvent<HTMLElement>) => {
     const audio = audioRef.current;
-    const canvas = canvasRef.current;
-    if (!audio || !canvas || !audio.duration) return;
+    const target = e.currentTarget;
+    if (!audio || !target || !audio.duration) return;
 
-    const rect = canvas.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, x / rect.width));
     audio.currentTime = ratio * audio.duration;
@@ -251,7 +259,7 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
           size="icon"
           className="h-9 w-9 shrink-0"
           onClick={togglePlayPause}
-          disabled={!peaks}
+          disabled={!waveformLoaded}
           aria-label={isPlaying ? "Pause" : "Play"}
         >
           {isPlaying ? (
@@ -262,17 +270,22 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
         </Button>
 
         <div className="relative flex-1 min-w-0">
-          {!peaks ? (
+          {!waveformLoaded ? (
             <div className="flex items-center justify-center h-16">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : (
+          ) : peaks ? (
             <canvas
               ref={canvasRef}
               className="w-full h-16 cursor-pointer"
               style={{ touchAction: "none" }}
               onClick={handleCanvasClick}
             />
+          ) : (
+            <div className="relative h-16 cursor-pointer" onClick={handleCanvasClick}>
+              <div className="absolute inset-y-0 left-0 bg-primary/20" ref={progressBarRef} />
+              <div className="absolute top-1/2 left-0 right-0 h-px bg-muted-foreground/50" />
+            </div>
           )}
         </div>
 

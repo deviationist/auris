@@ -6,5 +6,7 @@ export const recordings = sqliteTable("recordings", {
   size: integer("size"),
   duration: real("duration"),
   device: text("device"),
+  waveform: text("waveform"),
+  waveformHash: text("waveform_hash"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });

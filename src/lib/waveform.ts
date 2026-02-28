@@ -1,10 +1,8 @@
-import { writeFile } from "fs/promises";
 import { spawn } from "child_process";
+import { createHash } from "crypto";
 
 const SAMPLE_RATE = 8000;
-const PEAKS_PER_SECOND = 50;
-const MIN_PEAKS = 200;
-const MAX_PEAKS = 2000;
+const NUM_PEAKS = 1600;
 
 function extractPCM(mp3Path: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -47,14 +45,20 @@ function computePeaks(pcmBuffer: Buffer, numBars: number): number[] {
   }
 
   if (maxPeak === 0) return peaks.map(() => 0);
-  return peaks.map((p) => +(p / maxPeak).toFixed(3));
+
+  // Use 99th percentile for normalization so occasional loud spikes
+  // don't crush the rest of the waveform to near-zero
+  const sorted = [...peaks].sort((a, b) => a - b);
+  const p99 = sorted[Math.floor(sorted.length * 0.99)] || maxPeak;
+  const ceiling = Math.max(p99, maxPeak * 0.1); // never less than 10% of max
+  return peaks.map((p) => +Math.min(1, p / ceiling).toFixed(3));
 }
 
-export async function generateWaveform(mp3Path: string, cachePath: string): Promise<number[]> {
+export function hashWaveform(json: string): string {
+  return createHash("sha256").update(json).digest("hex").slice(0, 8);
+}
+
+export async function generateWaveform(mp3Path: string): Promise<number[]> {
   const pcm = await extractPCM(mp3Path);
-  const durationSecs = pcm.length / 2 / SAMPLE_RATE;
-  const numBars = Math.min(MAX_PEAKS, Math.max(MIN_PEAKS, Math.round(durationSecs * PEAKS_PER_SECOND)));
-  const peaks = computePeaks(pcm, numBars);
-  await writeFile(cachePath, JSON.stringify(peaks), "utf-8");
-  return peaks;
+  return computePeaks(pcm, NUM_PEAKS);
 }

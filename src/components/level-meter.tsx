@@ -103,7 +103,7 @@ export function LevelMeter({ audioElement, active }: LevelMeterProps) {
         <span className="font-mono" aria-live="polite" aria-atomic="true">{displayDb} dB</span>
       </div>
       <div
-        className="h-2 w-full rounded-full bg-muted overflow-hidden"
+        className="h-2 w-full rounded-full bg-muted-foreground/20 overflow-hidden"
         role="progressbar"
         aria-valuemin={-60}
         aria-valuemax={0}

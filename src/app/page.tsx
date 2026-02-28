@@ -75,6 +75,7 @@ interface Recording {
   createdAt: number;
   duration: number | null;
   device: string | null;
+  waveformHash: string | null;
 }
 
 interface MixerVolume {
@@ -160,6 +161,7 @@ export default function Home() {
   const [listenLoading, setListenLoading] = useState(false);
   const [listenReconnecting, setListenReconnecting] = useState(false);
   const [toneLoading, setToneLoading] = useState(false);
+  const [toneConnected, setToneConnected] = useState(false);
   const [recordElapsed, setRecordElapsed] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const listenInitiatedStreamRef = useRef(false);
@@ -449,6 +451,10 @@ export default function Home() {
         audio.src = `${streamUrl}?t=${Date.now()}`;
         audio.load();
         audio.play().catch(() => {});
+        audio.onplaying = () => {
+          setToneConnected(true);
+          audio.onplaying = null;
+        };
 
         const cleanup = () => {
           toneCleanupRef.current = null;
@@ -457,6 +463,7 @@ export default function Home() {
           toneTimeoutRef.current = setTimeout(() => {
             toneTimeoutRef.current = null;
             setToneLoading(false);
+            setToneConnected(false);
             audio.pause();
             audio.removeAttribute("src");
             audio.load();
@@ -489,11 +496,13 @@ export default function Home() {
         audio.removeEventListener("error", cleanup);
         toneCleanupRef.current = null;
       }
+      audio.onplaying = null;
       audio.pause();
       audio.removeAttribute("src");
       audio.load();
     }
     setToneLoading(false);
+    setToneConnected(false);
     // Kill the test tone process on the server
     pendingStopRef.current = fetch("/api/stream/test-tone", { method: "DELETE" })
       .then(() => {})
@@ -699,7 +708,7 @@ export default function Home() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg" role="heading" aria-level={2}>Monitor</CardTitle>
-                {liveConnected && (
+                {liveConnected ? (
                   <Badge
                     variant="default"
                     role="status"
@@ -708,7 +717,23 @@ export default function Home() {
                   >
                     <Volume2 className="mr-1 h-3 w-3" aria-hidden="true" /> Listening
                   </Badge>
-                )}
+                ) : listenLoading ? (
+                  <Badge
+                    variant="secondary"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" /> {listenReconnecting ? "Reconnecting" : "Connecting"}
+                  </Badge>
+                ) : toneLoading ? (
+                  <Badge
+                    variant="secondary"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <AudioWaveform className="mr-1 h-3 w-3" aria-hidden="true" /> Test Tone
+                  </Badge>
+                ) : null}
               </div>
               <CardDescription>
                 Listen to live audio input
@@ -757,14 +782,14 @@ export default function Home() {
 
               <audio
                 ref={audioRef}
-                controls={liveConnected || toneLoading}
-                className={`live-audio ${liveConnected || toneLoading ? "w-full h-8" : "hidden"}`}
+                controls={liveConnected || toneConnected}
+                className={`live-audio ${liveConnected || toneConnected ? "w-full h-8" : "hidden"}`}
                 aria-label="Live audio stream"
               />
-              <div className={liveConnected || toneLoading ? "" : "hidden"}>
+              <div className={liveConnected || toneConnected ? "" : "hidden"}>
                 <LevelMeter
                   audioElement={audioRef.current}
-                  active={liveConnected || toneLoading}
+                  active={liveConnected || toneConnected}
                 />
               </div>
             </CardContent>
@@ -799,7 +824,7 @@ export default function Home() {
                   onValueChange={selectDevice}
                   disabled={deviceLoading}
                 >
-                  <SelectTrigger id="device-select">
+                  <SelectTrigger id="device-select" aria-label="Capture Device">
                     <SelectValue placeholder="Select device..." />
                   </SelectTrigger>
                   <SelectContent>
@@ -941,7 +966,7 @@ export default function Home() {
                     const isPlaying = playingFile === rec.filename;
                     return (
                     <React.Fragment key={rec.filename}>
-                    <TableRow className={isActive ? "bg-red-500/10" : ""}>
+                    <TableRow className={`${isActive ? "bg-red-500/10" : ""} ${isPlaying ? "border-b-0 bg-muted/50" : ""}`}>
                       <TableCell className="font-mono text-sm">
                         <span className="flex items-center gap-2">
                           <span>{rec.filename}</span>
@@ -1046,11 +1071,11 @@ export default function Home() {
                       </TableCell>
                     </TableRow>
                     {isPlaying && (
-                      <TableRow>
+                      <TableRow className="bg-muted/50">
                         <TableCell colSpan={6} className="p-3">
                           <WaveformPlayer
                             src={`/api/recordings/${encodeURIComponent(rec.filename)}`}
-                            waveformUrl={`/api/recordings/${encodeURIComponent(rec.filename)}/waveform`}
+                            waveformUrl={`/api/recordings/${encodeURIComponent(rec.filename)}/waveform${rec.waveformHash ? `?v=${rec.waveformHash}` : ""}`}
                             onEnded={() => setPlayingFile(null)}
                           />
                         </TableCell>
