@@ -132,14 +132,14 @@
   }
 }
 
-audio::-webkit-media-controls-timeline {
+audio.live-audio::-webkit-media-controls-timeline {
   display: none;
 }
 
-audio::-webkit-media-controls-volume-control-container {
+audio.live-audio::-webkit-media-controls-volume-control-container {
   margin-left: auto;
 }
 
-audio::-webkit-media-controls-overflow-button {
+audio.live-audio::-webkit-media-controls-overflow-button {
   display: none;
 }

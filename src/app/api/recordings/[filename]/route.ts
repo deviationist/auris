@@ -25,6 +25,28 @@ export async function GET(
 
   try {
     const s = await stat(filePath);
+    const rangeHeader = _request.headers.get("range");
+
+    if (rangeHeader) {
+      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+      const start = match ? parseInt(match[1], 10) : 0;
+      const end = match && match[2] ? parseInt(match[2], 10) : s.size - 1;
+      const chunkSize = end - start + 1;
+
+      const stream = createReadStream(filePath, { start, end });
+      const webStream = Readable.toWeb(stream) as ReadableStream;
+
+      return new Response(webStream, {
+        status: 206,
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "Content-Length": String(chunkSize),
+          "Content-Range": `bytes ${start}-${end}/${s.size}`,
+          "Accept-Ranges": "bytes",
+        },
+      });
+    }
+
     const stream = createReadStream(filePath);
     const webStream = Readable.toWeb(stream) as ReadableStream;
 
@@ -33,6 +55,7 @@ export async function GET(
         "Content-Type": "audio/mpeg",
         "Content-Length": String(s.size),
         "Content-Disposition": `inline; filename="${safe}"`,
+        "Accept-Ranges": "bytes",
       },
     });
   } catch (error) {

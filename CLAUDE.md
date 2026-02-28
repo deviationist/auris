@@ -11,7 +11,7 @@ Next.js (port 3075) ──rewrite /stream/*──→ Icecast2 (port 8000, localh
   ↕ sudo systemctl                            ↑
 systemd: auris-capture                    ffmpeg (ALSA → MP3)
   → capture.sh (reads /etc/default/auris)    ↑
-  → outputs to Icecast and/or file         USB Microphone
+  → outputs to Icecast and/or file         Audio Input (USB/ALSA)
 ```
 
 A single `auris-capture` service runs one ffmpeg process. State flags in `/etc/default/auris` (`CAPTURE_STREAM`, `CAPTURE_RECORD`) control whether ffmpeg outputs to Icecast, a recording file, or both. Toggling stream/record restarts the service with updated outputs (~1s dropout).

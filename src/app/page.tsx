@@ -1,14 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import {
-  Mic,
-  MicOff,
+  AudioLines,
   Circle,
   Square,
   Play,
-  Radio,
   Download,
   Loader2,
   Volume2,
@@ -139,15 +137,40 @@ function formatDate(ms: number): string {
   });
 }
 
+function PlaybackPlayer({ src, onEnded }: { src: string; onEnded: () => void }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.src = src;
+    audio.load();
+    audio.play().catch(() => {});
+  }, [src]);
+
+  return (
+    <div className="space-y-2">
+      <audio
+        ref={audioRef}
+        controls
+        onEnded={onEnded}
+        className="w-full"
+        aria-label="Recording playback"
+      />
+      <LevelMeter audioElement={audioRef.current} active />
+    </div>
+  );
+}
+
 export default function Home() {
   const { theme, setTheme } = useTheme();
+  const [statusLoaded, setStatusLoaded] = useState(false);
   const [status, setStatus] = useState<Status>({
     streaming: false,
     recording: false,
     recording_file: null,
   });
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
-  const [streamLoading, setStreamLoading] = useState(false);
   const [recordLoading, setRecordLoading] = useState(false);
   const [playingFile, setPlayingFile] = useState<string | null>(null);
   const [mixer, setMixer] = useState<MixerState | null>(null);
@@ -157,15 +180,20 @@ export default function Home() {
   const [localCapture, setLocalCapture] = useState<number | null>(null);
   const [localBoost, setLocalBoost] = useState<number | null>(null);
   const [liveConnected, setLiveConnected] = useState(false);
-  const [connectLoading, setConnectLoading] = useState(false);
+  const [listenLoading, setListenLoading] = useState(false);
+  const [listenReconnecting, setListenReconnecting] = useState(false);
   const [toneLoading, setToneLoading] = useState(false);
+  const [recordElapsed, setRecordElapsed] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const playbackRef = useRef<HTMLAudioElement>(null);
+  const listenInitiatedStreamRef = useRef(false);
 
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/status");
-      if (res.ok) setStatus(await res.json());
+      if (res.ok) {
+        setStatus(await res.json());
+        setStatusLoaded(true);
+      }
     } catch {
       // ignore transient errors
     }
@@ -213,21 +241,87 @@ export default function Home() {
     };
   }, [fetchStatus, fetchRecordings, fetchMixer, fetchDevices]);
 
-  async function toggleStream() {
-    setStreamLoading(true);
+  // Recording elapsed timer — derive start time from the active recording's createdAt
+  useEffect(() => {
+    if (status.recording && status.recording_file) {
+      const activeRec = recordings?.find((r) => r.filename === status.recording_file);
+      const startTime = activeRec?.createdAt ?? Date.now();
+      setRecordElapsed(Math.floor((Date.now() - startTime) / 1000));
+      const interval = setInterval(() => {
+        setRecordElapsed(Math.floor((Date.now() - startTime) / 1000));
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setRecordElapsed(0);
+    }
+  }, [status.recording, status.recording_file, recordings]);
+
+  // Clean up stream on page unload if we started it
+  useEffect(() => {
+    const handleUnload = () => {
+      if (listenInitiatedStreamRef.current && !status.recording) {
+        navigator.sendBeacon("/api/stream/stop");
+      }
+    };
+    window.addEventListener("beforeunload", handleUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleUnload);
+    };
+  }, [status.recording]);
+
+  async function waitForStream(timeoutMs: number): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const res = await fetch("/api/status");
+        if (res.ok) {
+          const s = await res.json();
+          if (s.streaming) return true;
+        }
+      } catch {
+        // not ready yet
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return false;
+  }
+
+  async function startListening() {
+    setListenLoading(true);
     try {
-      const endpoint = status.streaming
-        ? "/api/stream/stop"
-        : "/api/stream/start";
-      await fetch(endpoint, { method: "POST" });
-      await new Promise((r) => setTimeout(r, 1000));
-      await fetchStatus();
-    } finally {
-      setStreamLoading(false);
+      if (!status.streaming) {
+        await fetch("/api/stream/start", { method: "POST" });
+        listenInitiatedStreamRef.current = true;
+        const ready = await waitForStream(5000);
+        if (!ready) {
+          toast.error("Stream failed to start");
+          setListenLoading(false);
+          return;
+        }
+        await fetchStatus();
+      } else {
+        listenInitiatedStreamRef.current = false;
+      }
+      connectLiveAudio();
+    } catch {
+      toast.error("Failed to start listening");
+      setListenLoading(false);
     }
   }
 
+  async function stopListening() {
+    disconnectLiveAudio();
+    try {
+      await fetch("/api/stream/stop", { method: "POST" });
+      await fetchStatus();
+    } catch {
+      // best effort
+    }
+    listenInitiatedStreamRef.current = false;
+  }
+
   async function toggleRecord() {
+    const wasListening = liveConnected;
     setRecordLoading(true);
     try {
       const endpoint = status.recording
@@ -237,6 +331,14 @@ export default function Home() {
       await new Promise((r) => setTimeout(r, 1000));
       await fetchStatus();
       await fetchRecordings();
+      // Service restart kills the Icecast connection — reconnect if we were listening
+      if (wasListening) {
+        setLiveConnected(false);
+        setListenLoading(true);
+        setListenReconnecting(true);
+        await waitForStream(5000);
+        connectLiveAudio();
+      }
     } finally {
       setRecordLoading(false);
     }
@@ -245,13 +347,13 @@ export default function Home() {
   function connectLiveAudio() {
     const audio = audioRef.current;
     if (!audio) return;
-    setConnectLoading(true);
     const streamUrl = process.env.NEXT_PUBLIC_STREAM_URL || "/stream/mic";
     audio.src = `${streamUrl}?t=${Date.now()}`;
     audio.load();
-    audio.play().catch(() => setConnectLoading(false));
+    audio.play().catch(() => setListenLoading(false));
     audio.onplaying = () => {
-      setConnectLoading(false);
+      setListenLoading(false);
+      setListenReconnecting(false);
       setLiveConnected(true);
       audio.onplaying = null;
     };
@@ -266,11 +368,25 @@ export default function Home() {
       audio.onplaying = null;
     }
     setLiveConnected(false);
-    setConnectLoading(false);
+    setListenLoading(false);
+    setListenReconnecting(false);
   }
 
   async function sendTestTone() {
     setToneLoading(true);
+    if (liveConnected || status.streaming) {
+      await stopListening();
+      // Wait for the capture service to fully stop
+      const start = Date.now();
+      while (Date.now() - start < 3000) {
+        const res = await fetch("/api/status");
+        if (res.ok) {
+          const s = await res.json();
+          if (!s.streaming) break;
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    }
     try {
       const res = await fetch("/api/stream/test-tone", { method: "POST" });
       if (!res.ok) {
@@ -285,11 +401,15 @@ export default function Home() {
         audio.load();
         audio.play().catch(() => {});
       }
-      setLiveConnected(true);
       // Tone lasts ~3s, give extra buffer then clean up
       setTimeout(() => {
         setToneLoading(false);
-        disconnectLiveAudio();
+        const a = audioRef.current;
+        if (a) {
+          a.pause();
+          a.removeAttribute("src");
+          a.load();
+        }
       }, 5000);
     } catch {
       setToneLoading(false);
@@ -304,7 +424,6 @@ export default function Home() {
       );
       if (res.ok) {
         if (playingFile === filename) {
-          playbackRef.current?.pause();
           setPlayingFile(null);
         }
         await fetchRecordings();
@@ -318,16 +437,10 @@ export default function Home() {
   }
 
   function playRecording(filename: string) {
-    const audio = playbackRef.current;
-    if (!audio) return;
     if (playingFile === filename) {
-      audio.pause();
       setPlayingFile(null);
       return;
     }
-    audio.src = `/api/recordings/${encodeURIComponent(filename)}`;
-    audio.load();
-    audio.play().catch(() => {});
     setPlayingFile(filename);
   }
 
@@ -348,8 +461,20 @@ export default function Home() {
   }
 
   async function selectDevice(alsaId: string) {
+    if (alsaId === deviceState?.selected) return;
     setDeviceLoading(true);
     try {
+      // Stop listening and recording before switching device
+      if (liveConnected) {
+        disconnectLiveAudio();
+      }
+      if (status.streaming) {
+        await fetch("/api/stream/stop", { method: "POST" });
+        listenInitiatedStreamRef.current = false;
+      }
+      if (status.recording) {
+        await fetch("/api/record/stop", { method: "POST" });
+      }
       await fetch("/api/audio/device", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -366,10 +491,10 @@ export default function Home() {
       <div className="mx-auto max-w-4xl space-y-6">
         {/* Header */}
         <div className="flex items-center gap-3">
-          <Mic className="h-8 w-8 text-primary" />
+          <AudioLines className="h-8 w-8 text-primary" />
           <h1 className="text-3xl font-bold tracking-tight">Auris</h1>
           <span className="text-sm text-muted-foreground">
-            Audio Streamer
+            Audio Monitor
           </span>
           <div className="ml-auto">
             <Button
@@ -386,141 +511,35 @@ export default function Home() {
 
         {/* Controls */}
         <div className="grid gap-4 md:grid-cols-2">
-          {/* Stream Card */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-lg" role="heading" aria-level={2}>Live Stream</CardTitle>
-                <Badge
-                  variant={status.streaming ? "default" : "secondary"}
-                  role="status"
-                  aria-live="polite"
-                  className={
-                    status.streaming
-                      ? "bg-green-600 hover:bg-green-600 text-white animate-pulse"
-                      : ""
-                  }
-                >
-                  {status.streaming ? (
-                    <>
-                      <Radio className="mr-1 h-3 w-3" aria-hidden="true" /> Live
-                    </>
-                  ) : (
-                    "Offline"
-                  )}
-                </Badge>
-              </div>
-              <CardDescription>
-                Stream audio from an audio source to Icecast
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Button
-                onClick={toggleStream}
-                disabled={streamLoading}
-                variant={status.streaming ? "destructive" : "default"}
-                className="w-full"
-              >
-                {streamLoading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : status.streaming ? (
-                  <MicOff className="mr-2 h-4 w-4" />
-                ) : (
-                  <Mic className="mr-2 h-4 w-4" />
-                )}
-                {status.streaming ? "Disable Stream" : "Enable Stream"}
-              </Button>
-
-              <div className="flex gap-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="flex-1">
-                      <Button
-                        variant={liveConnected ? "destructive" : "outline"}
-                        size="sm"
-                        onClick={liveConnected ? disconnectLiveAudio : connectLiveAudio}
-                        disabled={connectLoading || (!liveConnected && !status.streaming)}
-                        className="w-full"
-                      >
-                        {connectLoading ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Volume2 className="mr-2 h-4 w-4" />
-                        )}
-                        {connectLoading ? "Connecting..." : liveConnected ? "Stop Listening" : "Listen"}
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  {!status.streaming && !liveConnected && (
-                    <TooltipContent>
-                      <p>Start the stream first to listen</p>
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="flex-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={sendTestTone}
-                        disabled={status.streaming || toneLoading}
-                        className="w-full"
-                      >
-                        {toneLoading ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <AudioWaveform className="mr-2 h-4 w-4" />
-                        )}
-                        {toneLoading ? "Playing..." : "Test Tone"}
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  {status.streaming && (
-                    <TooltipContent>
-                      <p>Stop the stream first to send a test tone</p>
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              </div>
-              <audio
-                ref={audioRef}
-                controls={liveConnected}
-                className={liveConnected ? "w-full h-8" : "hidden"}
-                aria-label="Live audio stream"
-              />
-              {liveConnected && (
-                <LevelMeter
-                  audioElement={audioRef.current}
-                  active={status.streaming || toneLoading}
-                />
-              )}
-            </CardContent>
-          </Card>
-
           {/* Recording Card */}
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg" role="heading" aria-level={2}>Recording</CardTitle>
-                <Badge
-                  variant={status.recording ? "default" : "secondary"}
-                  role="status"
-                  aria-live="polite"
-                  className={
-                    status.recording
-                      ? "bg-red-600 hover:bg-red-600 animate-pulse"
-                      : ""
-                  }
-                >
-                  {status.recording ? (
-                    <>
-                      <Circle className="mr-1 h-3 w-3 fill-current" aria-hidden="true" /> REC
-                    </>
-                  ) : (
-                    "Stopped"
-                  )}
-                </Badge>
+                {!statusLoaded ? (
+                  <Badge variant="secondary" role="status" aria-live="polite">
+                    <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" /> Loading
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant={status.recording ? "default" : "secondary"}
+                    role="status"
+                    aria-live="polite"
+                    className={
+                      status.recording
+                        ? "bg-red-600 hover:bg-red-600 animate-pulse"
+                        : ""
+                    }
+                  >
+                    {status.recording ? (
+                      <>
+                        <Circle className="mr-1 h-3 w-3 fill-current" aria-hidden="true" /> REC
+                      </>
+                    ) : (
+                      "Stopped"
+                    )}
+                  </Badge>
+                )}
               </div>
               <CardDescription>
                 Record audio source to disk
@@ -531,7 +550,7 @@ export default function Home() {
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button
-                      disabled={recordLoading}
+                      disabled={!statusLoaded || recordLoading || toneLoading}
                       variant="destructive"
                       className="w-full"
                     >
@@ -564,7 +583,7 @@ export default function Home() {
               ) : (
                 <Button
                   onClick={toggleRecord}
-                  disabled={recordLoading}
+                  disabled={!statusLoaded || recordLoading || toneLoading}
                   className="w-full"
                 >
                   {recordLoading ? (
@@ -575,11 +594,94 @@ export default function Home() {
                   Start Recording
                 </Button>
               )}
-              {status.recording && status.recording_file && (
-                <p className="text-xs text-muted-foreground font-mono truncate" role="status">
-                  Recording to: {status.recording_file}
-                </p>
+              {status.recording && (
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  {status.recording_file && (
+                    <p className="font-mono truncate" role="status">
+                      {status.recording_file}
+                    </p>
+                  )}
+                  <span className="font-mono tabular-nums ml-auto" role="timer" aria-live="off">
+                    {formatDuration(recordElapsed)}
+                  </span>
+                </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Monitor Card */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg" role="heading" aria-level={2}>Monitor</CardTitle>
+                {liveConnected && (
+                  <Badge
+                    variant="default"
+                    role="status"
+                    aria-live="polite"
+                    className="bg-green-600 hover:bg-green-600 text-white animate-pulse"
+                  >
+                    <Volume2 className="mr-1 h-3 w-3" aria-hidden="true" /> Listening
+                  </Badge>
+                )}
+              </div>
+              <CardDescription>
+                Listen to live audio input
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button
+                onClick={liveConnected ? stopListening : startListening}
+                disabled={listenLoading || toneLoading}
+                variant={liveConnected ? "destructive" : "outline"}
+                className="w-full"
+              >
+                {listenLoading ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Volume2 className="mr-2 h-4 w-4" />
+                )}
+                {listenLoading ? (listenReconnecting ? "Reconnecting..." : "Connecting...") : liveConnected ? "Stop Listening" : "Listen"}
+              </Button>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="block">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={sendTestTone}
+                      disabled={status.recording || toneLoading}
+                      className="w-full"
+                    >
+                      {toneLoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <AudioWaveform className="mr-2 h-4 w-4" />
+                      )}
+                      {toneLoading ? "Playing..." : "Test Tone"}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {status.recording && (
+                  <TooltipContent>
+                    <p>Stop recording before sending a test tone</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
+
+              <audio
+                ref={audioRef}
+                controls={liveConnected || toneLoading}
+                className={`live-audio ${liveConnected || toneLoading ? "w-full h-8" : "hidden"}`}
+                aria-label="Live audio stream"
+              />
+              <div className={liveConnected || toneLoading ? "" : "hidden"}>
+                <LevelMeter
+                  audioElement={audioRef.current}
+                  active={liveConnected || toneLoading}
+                />
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -658,17 +760,17 @@ export default function Home() {
               </div>
             )}
 
-            {/* Mic Boost */}
+            {/* Input Boost */}
             {mixer?.micBoost && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="mic-boost">Mic Boost</Label>
+                  <Label htmlFor="input-boost">Input Boost</Label>
                   <span className="text-sm text-muted-foreground font-mono">
                     +{(localBoost ?? mixer.micBoost.value) * 12}dB
                   </span>
                 </div>
                 <Slider
-                  id="mic-boost"
+                  id="input-boost"
                   value={[localBoost ?? mixer.micBoost.value]}
                   min={0}
                   max={3}
@@ -679,7 +781,7 @@ export default function Home() {
                     updateMixer({ micBoost: v[0] });
                   }}
                   disabled={mixerLoading}
-                  aria-label="Mic Boost"
+                  aria-label="Input Boost"
                 />
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>0dB</span>
@@ -751,8 +853,10 @@ export default function Home() {
                 <TableBody>
                   {recordings.map((rec) => {
                     const isActive = status.recording && rec.filename === status.recording_file;
+                    const isPlaying = playingFile === rec.filename;
                     return (
-                    <TableRow key={rec.filename} className={isActive ? "bg-red-500/10" : ""}>
+                    <React.Fragment key={rec.filename}>
+                    <TableRow className={isActive ? "bg-red-500/10" : ""}>
                       <TableCell className="font-mono text-sm">
                         <span className="flex items-center gap-2">
                           <span>{rec.filename}</span>
@@ -855,6 +959,17 @@ export default function Home() {
                         </div>
                       </TableCell>
                     </TableRow>
+                    {isPlaying && (
+                      <TableRow>
+                        <TableCell colSpan={6} className="p-3">
+                          <PlaybackPlayer
+                            src={`/api/recordings/${encodeURIComponent(rec.filename)}`}
+                            onEnded={() => setPlayingFile(null)}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    </React.Fragment>
                     );
                   })}
                 </TableBody>
@@ -863,14 +978,6 @@ export default function Home() {
           </CardContent>
         </Card>
 
-        {/* Hidden playback audio element */}
-        <audio
-          ref={playbackRef}
-          onEnded={() => setPlayingFile(null)}
-          className="hidden"
-          aria-label="Recording playback"
-          tabIndex={-1}
-        />
       </div>
     </main>
   );
