@@ -5,3 +5,4 @@ data/
 .claude/
 .playwright-mcp/
 tsconfig.tsbuildinfo
+.DS_Store
