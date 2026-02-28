@@ -44,6 +44,8 @@ A single `auris-capture` service runs one ffmpeg process. State flags in `/etc/d
 | `src/app/api/` | All API routes (status, stream, record, audio, recordings) |
 | `system/` | systemd unit, icecast.xml, nginx config, sudoers |
 | `next.config.ts` | Rewrites `/stream/*` → Icecast localhost:8000 |
+| `setup.sh` | Automated setup script (installs system packages, configs, builds) |
+| `ecosystem.config.js` | PM2 process manager config |
 
 ## Development
 
@@ -53,6 +55,7 @@ npm run build              # Production build
 npm run start              # Production server
 npm run stop               # Kill process on port 3000
 npm run db:generate        # Generate DB migrations after schema changes
+npm run db:push            # Push schema directly to DB (dev only)
 npm run waveforms:generate    # Generate missing waveforms
 npm run waveforms:regenerate  # Regenerate all waveforms
 npm run waveforms:clear       # Remove all waveforms from DB

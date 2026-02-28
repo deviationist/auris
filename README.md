@@ -156,18 +156,23 @@ Without Nginx, the app is available directly at `http://<server>:3075`.
 ### 7. Verify
 
 1. Open the web UI in a browser
-2. Click **Enable Stream** — the badge should turn green and pulse
+2. Click **Start Recording** — the badge should turn red and a REC indicator appears in the recordings table
 3. Click **Listen** — you should hear live audio
-4. Click **Start Recording** — the badge should turn red and a REC indicator appears in the recordings table
-5. Stop recording, then check the **Recordings** table for duration and size
-6. Play or download a recording to verify
+4. Stop recording, then check the **Recordings** table for duration and size
+5. Play or download a recording to verify
 
 ## Development
 
 ```bash
-npm run dev          # starts Next.js on port 3000 with hot reload
-npm run db:generate  # generate DB migrations after schema changes
-npm run db:push      # push schema directly to DB (dev only)
+npm run dev                    # starts Next.js on port 3000 with hot reload
+npm run build                  # production build
+npm run start                  # production server
+npm run stop                   # kill process on port 3000
+npm run db:generate            # generate DB migrations after schema changes
+npm run db:push                # push schema directly to DB (dev only)
+npm run waveforms:generate     # generate missing waveforms
+npm run waveforms:regenerate   # regenerate all waveforms
+npm run waveforms:clear        # remove all waveforms from DB
 ```
 
 The API routes will work in dev mode as long as the systemd unit and sudoers are installed.
@@ -199,16 +204,20 @@ auris/
 │   │           └── mixer/route.ts      # GET/POST — read/set mixer levels
 │   ├── components/
 │   │   ├── ui/                         # shadcn/ui components (do not edit)
-│   │   ├── level-meter.tsx             # WebAudio level meter
+│   │   ├── level-meter.tsx             # WebAudio RMS/dB level meter
+│   │   ├── waveform-player.tsx         # Canvas waveform player with seek, play/pause
 │   │   └── theme-provider.tsx          # next-themes wrapper
 │   └── lib/
 │       ├── utils.ts                    # cn() helper
 │       ├── systemctl.ts                # systemctl wrapper
 │       ├── alsa.ts                     # ALSA device & mixer operations
 │       ├── device-config.ts            # /etc/default/auris read/write
+│       ├── waveform.ts                 # Waveform generation (ffmpeg PCM → peaks)
 │       └── db/
 │           ├── schema.ts               # Drizzle schema (recordings table)
 │           └── index.ts                # DB singleton, migrations, sync
+├── scripts/
+│   └── generate-waveforms.mjs          # CLI: generate/clear waveform data in DB
 ├── drizzle/                            # Generated DB migrations
 ├── data/                               # SQLite database (auris.db)
 ├── system/
