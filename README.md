@@ -2,7 +2,7 @@
 
 Audio monitoring and recording web application. Streams live audio via Icecast2 and records to disk, controlled through a Next.js web UI.
 
-![Auris screenshot](screenshot-v1.jpg)
+![Auris screenshot](screenshot-v2.jpg)
 
 ## Architecture
 
