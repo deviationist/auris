@@ -2,13 +2,12 @@
 
 import { useRef, useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Play, Pause, Loader2 } from "lucide-react";
+import { Play, Pause, Loader2, RotateCcw } from "lucide-react";
 import { LevelMeter } from "@/components/level-meter";
 
 interface WaveformPlayerProps {
   src: string;
   waveformUrl: string;
-  onEnded?: () => void;
 }
 
 function formatTime(seconds: number): string {
@@ -17,7 +16,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProps) {
+export function WaveformPlayer({ src, waveformUrl }: WaveformPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -28,12 +27,24 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
   const progressBarRef = useRef<HTMLDivElement>(null);
   const playedProbeRef = useRef<HTMLSpanElement>(null);
   const unplayedProbeRef = useRef<HTMLSpanElement>(null);
-  const onEndedRef = useRef(onEnded);
-  onEndedRef.current = onEnded;
-
   const [peaks, setPeaks] = useState<number[] | null>(null);
   const [waveformLoaded, setWaveformLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [hasEnded, setHasEnded] = useState(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const [audioCtxReady, setAudioCtxReady] = useState(false);
+
+  // Create AudioContext on mount — the parent click event (Play row action)
+  // is still the active user gesture, so iOS will allow it to run.
+  useEffect(() => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+    if (audioContextRef.current.state === "suspended") {
+      audioContextRef.current.resume();
+    }
+    setAudioCtxReady(true);
+  }, []);
 
   // Resolve theme colors from hidden probe elements
   const getColors = useCallback(() => {
@@ -165,10 +176,10 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
 
     const handleEnded = () => {
       setIsPlaying(false);
+      setHasEnded(true);
       cancelAnimationFrame(rafRef.current);
       updateTimeDisplay(audio.duration || 0, audio.duration || 0);
       draw(1);
-      onEndedRef.current?.();
     };
 
     const handleLoadedMetadata = () => {
@@ -226,6 +237,19 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
   const togglePlayPause = () => {
     const audio = audioRef.current;
     if (!audio) return;
+
+    // Ensure AudioContext is created/resumed during user gesture (iOS)
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+    if (audioContextRef.current.state === "suspended") {
+      audioContextRef.current.resume();
+    }
+
+    if (hasEnded) {
+      audio.currentTime = 0;
+      setHasEnded(false);
+    }
     if (audio.paused) {
       audio.play().catch(() => {});
     } else {
@@ -242,6 +266,7 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
     const x = e.clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, x / rect.width));
     audio.currentTime = ratio * audio.duration;
+    setHasEnded(false);
     updateTimeDisplay(audio.currentTime, audio.duration);
     draw(ratio);
   };
@@ -260,9 +285,11 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
           className="h-9 w-9 shrink-0"
           onClick={togglePlayPause}
           disabled={!waveformLoaded}
-          aria-label={isPlaying ? "Pause" : "Play"}
+          aria-label={hasEnded ? "Play again" : isPlaying ? "Pause" : "Play"}
         >
-          {isPlaying ? (
+          {hasEnded ? (
+            <RotateCcw className="h-4 w-4" aria-hidden="true" />
+          ) : isPlaying ? (
             <Pause className="h-4 w-4" aria-hidden="true" />
           ) : (
             <Play className="h-4 w-4" aria-hidden="true" />
@@ -297,7 +324,7 @@ export function WaveformPlayer({ src, waveformUrl, onEnded }: WaveformPlayerProp
         </span>
       </div>
 
-      <LevelMeter audioElement={audioRef.current} active={isPlaying} />
+      <LevelMeter audioElement={audioRef.current} audioContext={audioCtxReady ? audioContextRef.current : null} active={isPlaying} />
     </div>
   );
 }

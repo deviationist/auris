@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from "react";
 
 interface LevelMeterProps {
   audioElement: HTMLAudioElement | null;
+  audioContext: AudioContext | null;
   active: boolean;
 }
 
-export function LevelMeter({ audioElement, active }: LevelMeterProps) {
+export function LevelMeter({ audioElement, audioContext, active }: LevelMeterProps) {
   const [displayDb, setDisplayDb] = useState("-\u221E");
-  const contextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number>(0);
@@ -28,10 +28,8 @@ export function LevelMeter({ audioElement, active }: LevelMeterProps) {
       return;
     }
 
-    if (!contextRef.current) {
-      contextRef.current = new AudioContext();
-    }
-    const ctx = contextRef.current;
+    if (!audioContext) return;
+    const ctx = audioContext;
 
     if (!sourceRef.current) {
       try {
@@ -94,7 +92,7 @@ export function LevelMeter({ audioElement, active }: LevelMeterProps) {
     return () => {
       cancelAnimationFrame(rafRef.current);
     };
-  }, [active, audioElement]);
+  }, [active, audioElement, audioContext]);
 
   return (
     <div className="space-y-1" role="region" aria-label="Audio level meter">

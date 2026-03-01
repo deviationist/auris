@@ -15,6 +15,7 @@ import {
   Trash2,
   Sun,
   Moon,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -164,6 +165,8 @@ export default function Home() {
   const [toneConnected, setToneConnected] = useState(false);
   const [recordElapsed, setRecordElapsed] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const [audioContextReady, setAudioContextReady] = useState(false);
   const listenInitiatedStreamRef = useRef(false);
   const listenAbortRef = useRef<AbortController | null>(null);
   const toneAbortRef = useRef<AbortController | null>(null);
@@ -278,7 +281,20 @@ export default function Home() {
     return false;
   }
 
+  // Must be called synchronously from a click/tap handler so iOS
+  // allows the AudioContext to leave the "suspended" state.
+  function ensureAudioContext() {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+    if (audioContextRef.current.state === "suspended") {
+      audioContextRef.current.resume();
+    }
+    setAudioContextReady(true);
+  }
+
   async function startListening() {
+    ensureAudioContext();
     const controller = new AbortController();
     listenAbortRef.current = controller;
     setListenLoading(true);
@@ -403,6 +419,7 @@ export default function Home() {
   }
 
   async function sendTestTone() {
+    ensureAudioContext();
     const controller = new AbortController();
     toneAbortRef.current = controller;
     setToneLoading(true);
@@ -789,6 +806,7 @@ export default function Home() {
               <div className={liveConnected || toneConnected ? "" : "hidden"}>
                 <LevelMeter
                   audioElement={audioRef.current}
+                  audioContext={audioContextReady ? audioContextRef.current : null}
                   active={liveConnected || toneConnected}
                 />
               </div>
@@ -997,11 +1015,11 @@ export default function Home() {
                             className="h-9 w-9"
                             onClick={() => playRecording(rec.filename)}
                             disabled={isActive}
-                            aria-label={isPlaying ? "Stop playing" : "Play"}
-                            title={isPlaying ? "Stop playing" : "Play"}
+                            aria-label={isPlaying ? "Close player" : "Play"}
+                            title={isPlaying ? "Close player" : "Play"}
                           >
                             {isPlaying ? (
-                              <Square className="h-4 w-4 text-green-500" aria-hidden="true" />
+                              <X className="h-4 w-4" aria-hidden="true" />
                             ) : (
                               <Play className="h-4 w-4" aria-hidden="true" />
                             )}
@@ -1076,7 +1094,6 @@ export default function Home() {
                           <WaveformPlayer
                             src={`/api/recordings/${encodeURIComponent(rec.filename)}`}
                             waveformUrl={`/api/recordings/${encodeURIComponent(rec.filename)}/waveform${rec.waveformHash ? `?v=${rec.waveformHash}` : ""}`}
-                            onEnded={() => setPlayingFile(null)}
                           />
                         </TableCell>
                       </TableRow>
