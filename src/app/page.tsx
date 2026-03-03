@@ -255,6 +255,24 @@ export default function Home() {
     }
   }, [status.recording, status.recording_started]);
 
+  // Auto-connect live waveform after page reload when recording is active
+  useEffect(() => {
+    if (statusLoaded && status.recording && !audioContextReady) {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+      if (audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume().then(() => {
+          setAudioContextReady(true);
+        }).catch(() => {
+          // Browser requires user gesture — user will need to tap
+        });
+      } else {
+        setAudioContextReady(true);
+      }
+    }
+  }, [statusLoaded, status.recording, audioContextReady]);
+
   // Clean up stream on page unload if we started it
   useEffect(() => {
     const handleUnload = () => {
@@ -605,7 +623,7 @@ export default function Home() {
         <div className="flex items-center gap-3">
           <AudioLines className="h-8 w-8 text-primary" />
           <h1 className="text-3xl font-bold tracking-tight">Auris</h1>
-          <span className="text-sm text-muted-foreground">
+          <span className="text-sm pt-1 text-muted-foreground">
             Audio Monitor
           </span>
           <div className="ml-auto">
@@ -708,25 +726,34 @@ export default function Home() {
               )}
               {status.recording && (
                 <>
-                  {/* Mount waveform immediately (hidden) so it connects and buffers;
-                      show spinner overlay until the filename confirms the stream is live */}
                   <div className="relative">
                     <LiveWaveform
                       active={status.recording}
                       audioContext={audioContextReady ? audioContextRef.current : null}
                       streamUrl="/stream/mic"
                     />
-                    {!status.recording_file && (
-                      <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground/60 bg-background/80" role="status">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Starting stream...</span>
+                    {!audioContextReady && (
+                      <div
+                        className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground cursor-pointer bg-background/80 hover:bg-background/60 transition-colors"
+                        role="button"
+                        tabIndex={0}
+                        onClick={ensureAudioContext}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") ensureAudioContext(); }}
+                      >
+                        <AudioWaveform className="h-4 w-4" />
+                        <span>Tap to connect waveform</span>
                       </div>
                     )}
                   </div>
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    {status.recording_file && (
+                    {status.recording_file ? (
                       <p className="font-mono truncate" role="status">
                         {status.recording_file}
+                      </p>
+                    ) : (
+                      <p className="flex items-center gap-1.5" role="status">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <span>Loading filename...</span>
                       </p>
                     )}
                     <span className="font-mono tabular-nums ml-auto" role="timer" aria-live="off">
@@ -789,7 +816,7 @@ export default function Home() {
                 {listenLoading ? "Cancel" : liveConnected ? "Stop Listening" : "Listen"}
               </Button>
 
-              <Tooltip>
+              <Tooltip open={status.recording ? undefined : false}>
                 <TooltipTrigger asChild>
                   <span className="block">
                     <Button
@@ -808,11 +835,9 @@ export default function Home() {
                     </Button>
                   </span>
                 </TooltipTrigger>
-                {status.recording && (
-                  <TooltipContent>
-                    <p>Stop recording before sending a test tone</p>
-                  </TooltipContent>
-                )}
+                <TooltipContent>
+                  <p>Stop recording before sending a test tone</p>
+                </TooltipContent>
               </Tooltip>
 
               <audio

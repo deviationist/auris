@@ -13,6 +13,9 @@ tsconfig.tsbuildinfo
 .env
 .env*.local
 
+# Screenshots
+*.png
+
 # SQLite
 *.db
 *.db-journal
