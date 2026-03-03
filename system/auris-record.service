@@ -1,6 +1,5 @@
 [Unit]
-Description=Auris audio recorder (Icecast to file)
-After=auris-stream.service
+Description=Auris audio recorder (ALSA to file)
 
 [Service]
 Type=simple

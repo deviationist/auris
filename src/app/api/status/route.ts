@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isActive } from "@/lib/systemctl";
-import { getSelectedDevice, getRecordStartedAt } from "@/lib/device-config";
+import { getRecordDevice, getRecordStartedAt } from "@/lib/device-config";
 import { listCaptureDevices } from "@/lib/alsa";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
@@ -66,7 +66,7 @@ export async function GET() {
             if (!existing) {
               let deviceName: string | undefined;
               try {
-                const alsaId = await getSelectedDevice();
+                const alsaId = await getRecordDevice();
                 const devices = await listCaptureDevices();
                 deviceName = devices.find((d) => d.alsaId === alsaId)?.name;
               } catch {

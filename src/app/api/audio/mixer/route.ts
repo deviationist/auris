@@ -7,18 +7,13 @@ import {
   setMicBoost,
   setInputSource,
 } from "@/lib/alsa";
-import { getSelectedDevice } from "@/lib/device-config";
 
 export const dynamic = "force-dynamic";
 
-function cardFromDevice(alsaId: string): number {
-  const match = alsaId.match(/^plughw:(\d+)/);
-  return match ? parseInt(match[1]) : 0;
-}
-
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const card = cardFromDevice(await getSelectedDevice());
+    const cardParam = request.nextUrl.searchParams.get("card");
+    const card = cardParam !== null ? parseInt(cardParam, 10) : 0;
     const [capture, micBoost, inputSource] = await Promise.all([
       getCaptureVolume(card),
       getMicBoost(card),
@@ -35,8 +30,8 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const card = cardFromDevice(await getSelectedDevice());
     const body = await request.json();
+    const card = typeof body.card === "number" ? body.card : 0;
     const updated: string[] = [];
 
     if (body.capture !== undefined) {

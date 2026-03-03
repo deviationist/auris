@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setListenDevice, setRecordDevice } from "@/lib/device-config";
+import { setStreamBitrate, setRecordBitrate } from "@/lib/device-config";
 import { isActive, stopUnit, startUnit } from "@/lib/systemctl";
+
+const VALID_BITRATES = ["64k", "96k", "128k", "192k", "256k", "320k"];
 
 export async function POST(request: NextRequest) {
   try {
-    const { alsaId, role } = await request.json();
-    if (!alsaId || typeof alsaId !== "string") {
-      return NextResponse.json({ error: "Missing alsaId" }, { status: 400 });
-    }
-    if (!/^plughw:\d+,\d+$/.test(alsaId)) {
+    const { bitrate, role } = await request.json();
+    if (!bitrate || !VALID_BITRATES.includes(bitrate)) {
       return NextResponse.json(
-        { error: "Invalid device format" },
+        { error: `bitrate must be one of: ${VALID_BITRATES.join(", ")}` },
         { status: 400 }
       );
     }
@@ -24,19 +23,19 @@ export async function POST(request: NextRequest) {
     if (role === "listen") {
       const streamWasActive = await isActive("auris-stream");
       if (streamWasActive) await stopUnit("auris-stream");
-      await setListenDevice(alsaId);
+      await setStreamBitrate(bitrate);
       if (streamWasActive) await startUnit("auris-stream");
     } else {
       const recordWasActive = await isActive("auris-record");
       if (recordWasActive) await stopUnit("auris-record");
-      await setRecordDevice(alsaId);
+      await setRecordBitrate(bitrate);
       if (recordWasActive) await startUnit("auris-record");
     }
 
-    return NextResponse.json({ ok: true, device: alsaId, role });
+    return NextResponse.json({ ok: true, bitrate, role });
   } catch (error) {
     return NextResponse.json(
-      { error: "Failed to set device", detail: String(error) },
+      { error: "Failed to set bitrate", detail: String(error) },
       { status: 500 }
     );
   }

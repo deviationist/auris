@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCaptureMode, setCaptureMode, getRecordStartedAt, setRecordStartedAt } from "@/lib/device-config";
+import { setCaptureMode, getRecordStartedAt, setRecordStartedAt } from "@/lib/device-config";
 import { stopUnit } from "@/lib/systemctl";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
@@ -64,12 +64,6 @@ export async function POST() {
 
     // Stop the recorder
     await stopUnit("auris-record");
-
-    // Check if user is listening — if not, also stop the stream
-    const mode = await getCaptureMode();
-    if (!mode.stream) {
-      await stopUnit("auris-stream");
-    }
 
     // Find the active recording file and update DB with final metadata
     if (startedAt) {

@@ -26,16 +26,54 @@ async function writeConfig(config: Record<string, string>): Promise<void> {
   await exec(`echo '${content}' | sudo tee ${CONFIG_PATH} > /dev/null`);
 }
 
-export async function getSelectedDevice(): Promise<string> {
+export async function getListenDevice(): Promise<string> {
   const config = await readConfig();
-  return config.ALSA_DEVICE || "plughw:0,0";
+  return config.ALSA_DEVICE_LISTEN || config.ALSA_DEVICE || "plughw:0,0";
 }
 
-export async function setSelectedDevice(alsaId: string): Promise<void> {
+export async function setListenDevice(alsaId: string): Promise<void> {
   const config = await readConfig();
-  config.ALSA_DEVICE = alsaId;
+  config.ALSA_DEVICE_LISTEN = alsaId;
+  config.ALSA_DEVICE = alsaId; // backward compat
   await writeConfig(config);
 }
+
+export async function getRecordDevice(): Promise<string> {
+  const config = await readConfig();
+  return config.ALSA_DEVICE_RECORD || config.ALSA_DEVICE || "plughw:0,0";
+}
+
+export async function setRecordDevice(alsaId: string): Promise<void> {
+  const config = await readConfig();
+  config.ALSA_DEVICE_RECORD = alsaId;
+  await writeConfig(config);
+}
+
+export async function getStreamBitrate(): Promise<string> {
+  const config = await readConfig();
+  return config.STREAM_BITRATE || "128k";
+}
+
+export async function setStreamBitrate(bitrate: string): Promise<void> {
+  const config = await readConfig();
+  config.STREAM_BITRATE = bitrate;
+  await writeConfig(config);
+}
+
+export async function getRecordBitrate(): Promise<string> {
+  const config = await readConfig();
+  return config.RECORD_BITRATE || "128k";
+}
+
+export async function setRecordBitrate(bitrate: string): Promise<void> {
+  const config = await readConfig();
+  config.RECORD_BITRATE = bitrate;
+  await writeConfig(config);
+}
+
+// Aliases for backward compatibility
+export const getSelectedDevice = getListenDevice;
+export const setSelectedDevice = setListenDevice;
 
 export async function getCaptureMode(): Promise<{
   stream: boolean;

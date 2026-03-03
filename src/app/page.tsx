@@ -10,12 +10,13 @@ import {
   Download,
   Loader2,
   Volume2,
-  Settings2,
   AudioWaveform,
   Trash2,
   Sun,
   Moon,
   X,
+  Cog,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -47,7 +48,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -55,10 +55,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LevelMeter } from "@/components/level-meter";
 import { LiveWaveform } from "@/components/live-waveform";
 import { WaveformPlayer } from "@/components/waveform-player";
+import { CardMixer, type CardMixerState } from "@/components/card-mixer";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Tooltip,
   TooltipContent,
@@ -81,28 +87,6 @@ interface Recording {
   waveformHash: string | null;
 }
 
-interface MixerVolume {
-  name: string;
-  min: number;
-  max: number;
-  value: number;
-  percent: number;
-  dB: string;
-  enabled: boolean;
-}
-
-interface MixerEnum {
-  name: string;
-  items: string[];
-  current: string;
-}
-
-interface MixerState {
-  capture: MixerVolume | null;
-  micBoost: MixerVolume | null;
-  inputSource: MixerEnum | null;
-}
-
 interface CaptureDevice {
   card: number;
   device: number;
@@ -113,8 +97,13 @@ interface CaptureDevice {
 
 interface DeviceState {
   devices: CaptureDevice[];
-  selected: string;
+  selectedListen: string;
+  selectedRecord: string;
+  streamBitrate: string;
+  recordBitrate: string;
 }
+
+const BITRATE_OPTIONS = ["64k", "96k", "128k", "192k", "256k", "320k"];
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -155,12 +144,11 @@ export default function Home() {
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
   const [playingFile, setPlayingFile] = useState<string | null>(null);
-  const [mixer, setMixer] = useState<MixerState | null>(null);
+  const [cardMixers, setCardMixers] = useState<CardMixerState[] | null>(null);
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null);
   const [mixerLoading, setMixerLoading] = useState(false);
+  const [mixerOpen, setMixerOpen] = useState(false);
   const [deviceLoading, setDeviceLoading] = useState(false);
-  const [localCapture, setLocalCapture] = useState<number | null>(null);
-  const [localBoost, setLocalBoost] = useState<number | null>(null);
   const [liveConnected, setLiveConnected] = useState(false);
   const [listenLoading, setListenLoading] = useState(false);
   const [listenReconnecting, setListenReconnecting] = useState(false);
@@ -199,10 +187,10 @@ export default function Home() {
     }
   }, []);
 
-  const fetchMixer = useCallback(async () => {
+  const fetchAllMixers = useCallback(async () => {
     try {
-      const res = await fetch("/api/audio/mixer");
-      if (res.ok) setMixer(await res.json());
+      const res = await fetch("/api/audio/mixer/all");
+      if (res.ok) setCardMixers(await res.json());
     } catch {
       // ignore
     }
@@ -220,17 +208,17 @@ export default function Home() {
   useEffect(() => {
     fetchStatus();
     fetchRecordings();
-    fetchMixer();
+    fetchAllMixers();
     fetchDevices();
     const statusInterval = setInterval(fetchStatus, 3000);
     const recordingsInterval = setInterval(fetchRecordings, 10000);
-    const mixerInterval = setInterval(fetchMixer, 5000);
+    const mixerInterval = setInterval(fetchAllMixers, 5000);
     return () => {
       clearInterval(statusInterval);
       clearInterval(recordingsInterval);
       clearInterval(mixerInterval);
     };
-  }, [fetchStatus, fetchRecordings, fetchMixer, fetchDevices]);
+  }, [fetchStatus, fetchRecordings, fetchAllMixers, fetchDevices]);
 
   // Recording elapsed timer — use recording_started from the status API (DB createdAt)
   // so the timer survives page refreshes. Falls back to Date.now() if not yet available.
@@ -582,6 +570,7 @@ export default function Home() {
   }
 
   async function updateMixer(
+    card: number,
     updates: Partial<{ capture: number; micBoost: number; inputSource: string }>
   ) {
     setMixerLoading(true);
@@ -589,16 +578,16 @@ export default function Home() {
       await fetch("/api/audio/mixer", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
+        body: JSON.stringify({ ...updates, card }),
       });
-      await fetchMixer();
+      await fetchAllMixers();
     } finally {
       setMixerLoading(false);
     }
   }
 
-  async function selectDevice(alsaId: string) {
-    if (alsaId === deviceState?.selected) return;
+  async function selectListenDevice(alsaId: string) {
+    if (alsaId === deviceState?.selectedListen) return;
     setDeviceLoading(true);
     try {
       if (liveConnected) {
@@ -608,9 +597,58 @@ export default function Home() {
       await fetch("/api/audio/device", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ alsaId }),
+        body: JSON.stringify({ alsaId, role: "listen" }),
       });
-      await Promise.all([fetchDevices(), fetchStatus(), fetchMixer()]);
+      await Promise.all([fetchDevices(), fetchStatus(), fetchAllMixers()]);
+    } finally {
+      setDeviceLoading(false);
+    }
+  }
+
+  async function selectRecordDevice(alsaId: string) {
+    if (alsaId === deviceState?.selectedRecord) return;
+    setDeviceLoading(true);
+    try {
+      await fetch("/api/audio/device", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alsaId, role: "record" }),
+      });
+      await Promise.all([fetchDevices(), fetchStatus()]);
+    } finally {
+      setDeviceLoading(false);
+    }
+  }
+
+  async function setStreamBitrate(bitrate: string) {
+    if (bitrate === deviceState?.streamBitrate) return;
+    setDeviceLoading(true);
+    try {
+      if (liveConnected) {
+        disconnectLiveAudio();
+      }
+      listenInitiatedStreamRef.current = false;
+      await fetch("/api/audio/bitrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bitrate, role: "listen" }),
+      });
+      await Promise.all([fetchDevices(), fetchStatus()]);
+    } finally {
+      setDeviceLoading(false);
+    }
+  }
+
+  async function setRecordBitrate(bitrate: string) {
+    if (bitrate === deviceState?.recordBitrate) return;
+    setDeviceLoading(true);
+    try {
+      await fetch("/api/audio/bitrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bitrate, role: "record" }),
+      });
+      await fetchDevices();
     } finally {
       setDeviceLoading(false);
     }
@@ -646,30 +684,87 @@ export default function Home() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg" role="heading" aria-level={2}>Recording</CardTitle>
-                {!statusLoaded ? (
-                  <Badge variant="secondary" role="status" aria-live="polite">
-                    <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" /> Loading
-                  </Badge>
-                ) : (
-                  <Badge
-                    variant={status.recording ? "default" : "secondary"}
-                    role="status"
-                    aria-live="polite"
-                    className={
-                      status.recording
-                        ? "bg-red-600 hover:bg-red-600 animate-pulse"
-                        : ""
-                    }
-                  >
-                    {status.recording ? (
-                      <>
-                        <Circle className="mr-1 h-3 w-3 fill-current" aria-hidden="true" /> REC
-                      </>
-                    ) : (
-                      "Stopped"
-                    )}
-                  </Badge>
-                )}
+                <div className="flex items-center gap-1.5">
+                  {!statusLoaded ? (
+                    <Badge variant="secondary" role="status" aria-live="polite">
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" /> Loading
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant={status.recording ? "default" : "secondary"}
+                      role="status"
+                      aria-live="polite"
+                      className={
+                        status.recording
+                          ? "bg-red-600 hover:bg-red-600 animate-pulse"
+                          : ""
+                      }
+                    >
+                      {status.recording ? (
+                        <>
+                          <Circle className="mr-1 h-3 w-3 fill-current" aria-hidden="true" /> REC
+                        </>
+                      ) : (
+                        "Stopped"
+                      )}
+                    </Badge>
+                  )}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Recording device settings">
+                        <Cog className="h-3.5 w-3.5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64" align="end">
+                      {deviceState && deviceState.devices.length > 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium">Recording Device</p>
+                          <Select
+                            value={deviceState.selectedRecord}
+                            onValueChange={selectRecordDevice}
+                            disabled={deviceLoading || status.recording}
+                          >
+                            <SelectTrigger className="text-xs h-8" aria-label="Recording device">
+                              <SelectValue placeholder="Select device...">
+                                {deviceState.devices.find((d) => d.alsaId === deviceState.selectedRecord)?.cardName ?? deviceState.selectedRecord}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {deviceState.devices.map((d) => (
+                                <SelectItem key={d.alsaId} value={d.alsaId} textValue={d.cardName}>
+                                  <span>{d.cardName}</span>
+                                  <span className="text-muted-foreground text-xs">{d.alsaId}</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-sm font-medium pt-2">Quality</p>
+                          <Select
+                            value={deviceState.recordBitrate}
+                            onValueChange={setRecordBitrate}
+                            disabled={deviceLoading || status.recording}
+                          >
+                            <SelectTrigger className="text-xs h-8" aria-label="Recording bitrate">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {BITRATE_OPTIONS.map((b) => (
+                                <SelectItem key={b} value={b}>
+                                  {b}bps{b === "128k" ? " (default)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Loading devices...</span>
+                        </div>
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
               <CardDescription>
                 Record audio source to disk
@@ -770,32 +865,89 @@ export default function Home() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg" role="heading" aria-level={2}>Monitor</CardTitle>
-                {liveConnected ? (
-                  <Badge
-                    variant="default"
-                    role="status"
-                    aria-live="polite"
-                    className="bg-green-600 hover:bg-green-600 text-white animate-pulse"
-                  >
-                    <Volume2 className="mr-1 h-3 w-3" aria-hidden="true" /> Listening
-                  </Badge>
-                ) : listenLoading ? (
-                  <Badge
-                    variant="secondary"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" /> {listenReconnecting ? "Reconnecting" : "Connecting"}
-                  </Badge>
-                ) : toneLoading ? (
-                  <Badge
-                    variant="secondary"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <AudioWaveform className="mr-1 h-3 w-3" aria-hidden="true" /> Test Tone
-                  </Badge>
-                ) : null}
+                <div className="flex items-center gap-1.5">
+                  {liveConnected ? (
+                    <Badge
+                      variant="default"
+                      role="status"
+                      aria-live="polite"
+                      className="bg-green-600 hover:bg-green-600 text-white animate-pulse"
+                    >
+                      <Volume2 className="mr-1 h-3 w-3" aria-hidden="true" /> Listening
+                    </Badge>
+                  ) : listenLoading ? (
+                    <Badge
+                      variant="secondary"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" /> {listenReconnecting ? "Reconnecting" : "Connecting"}
+                    </Badge>
+                  ) : toneLoading ? (
+                    <Badge
+                      variant="secondary"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <AudioWaveform className="mr-1 h-3 w-3" aria-hidden="true" /> Test Tone
+                    </Badge>
+                  ) : null}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Listening device settings">
+                        <Cog className="h-3.5 w-3.5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64" align="end">
+                      {deviceState && deviceState.devices.length > 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium">Listening Device</p>
+                          <Select
+                            value={deviceState.selectedListen}
+                            onValueChange={selectListenDevice}
+                            disabled={deviceLoading || liveConnected}
+                          >
+                            <SelectTrigger className="text-xs h-8" aria-label="Listening device">
+                              <SelectValue placeholder="Select device...">
+                                {deviceState.devices.find((d) => d.alsaId === deviceState.selectedListen)?.cardName ?? deviceState.selectedListen}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {deviceState.devices.map((d) => (
+                                <SelectItem key={d.alsaId} value={d.alsaId} textValue={d.cardName}>
+                                  <span>{d.cardName}</span>
+                                  <span className="text-muted-foreground text-xs">{d.alsaId}</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-sm font-medium pt-2">Quality</p>
+                          <Select
+                            value={deviceState.streamBitrate}
+                            onValueChange={setStreamBitrate}
+                            disabled={deviceLoading || liveConnected}
+                          >
+                            <SelectTrigger className="text-xs h-8" aria-label="Stream bitrate">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {BITRATE_OPTIONS.map((b) => (
+                                <SelectItem key={b} value={b}>
+                                  {b}bps{b === "128k" ? " (default)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Loading devices...</span>
+                        </div>
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                </div>
               </div>
               <CardDescription>
                 Listen to live audio input
@@ -859,135 +1011,61 @@ export default function Home() {
           </Card>
         </div>
 
-        {/* Audio Settings Card */}
+        {/* Mixer Card (collapsible) */}
         <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg" role="heading" aria-level={2}>Audio Settings</CardTitle>
-              <Badge variant="secondary">
-                <Settings2 className="mr-1 h-3 w-3" /> Config
-              </Badge>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between px-6 text-left cursor-pointer"
+            onClick={() => setMixerOpen((o) => !o)}
+            aria-expanded={mixerOpen}
+          >
+            <div>
+              <CardTitle className="text-lg" role="heading" aria-level={2}>Mixer</CardTitle>
+              <CardDescription>ALSA mixer levels per card</CardDescription>
             </div>
-            <CardDescription>
-              ALSA device selection and mixer levels
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Device Selection */}
-            <div className="space-y-2">
-              <Label htmlFor="device-select">Capture Device</Label>
-              {deviceState === null ? (
+            <ChevronDown
+              className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${mixerOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {mixerOpen && (
+            <CardContent className="pt-0">
+              {cardMixers === null ? (
                 <div className="flex items-center gap-2 h-9 px-3 text-sm text-muted-foreground" role="status" aria-live="polite">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  <span>Loading devices...</span>
+                  <span>Loading mixer...</span>
                 </div>
-              ) : deviceState.devices.length > 0 ? (
-                <Select
-                  value={deviceState.selected}
-                  onValueChange={selectDevice}
-                  disabled={deviceLoading}
-                >
-                  <SelectTrigger id="device-select" aria-label="Capture Device">
-                    <SelectValue placeholder="Select device..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {deviceState.devices.map((d) => (
-                      <SelectItem key={d.alsaId} value={d.alsaId}>
-                        {d.name} ({d.alsaId})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
+              ) : cardMixers.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No capture devices found
+                  No audio cards found
                 </p>
-              )}
-            </div>
-
-            {/* Capture Volume */}
-            {mixer?.capture && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="capture-volume">Capture Volume</Label>
-                  <span className="text-sm text-muted-foreground font-mono">
-                    {localCapture !== null
-                      ? `${Math.round((localCapture / mixer.capture.max) * 100)}%`
-                      : `${mixer.capture.percent}% (${mixer.capture.dB})`}
-                  </span>
-                </div>
-                <Slider
-                  id="capture-volume"
-                  value={[localCapture ?? mixer.capture.value]}
-                  min={mixer.capture.min}
-                  max={mixer.capture.max}
-                  step={1}
-                  onValueChange={(v) => setLocalCapture(v[0])}
-                  onValueCommit={(v) => {
-                    setLocalCapture(null);
-                    updateMixer({ capture: v[0] });
-                  }}
-                  disabled={mixerLoading}
-                  aria-label="Capture Volume"
+              ) : cardMixers.length === 1 ? (
+                <CardMixer
+                  mixer={cardMixers[0]}
+                  onUpdateMixer={updateMixer}
+                  loading={mixerLoading}
                 />
-              </div>
-            )}
-
-            {/* Input Boost */}
-            {mixer?.micBoost && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="input-boost">Input Boost</Label>
-                  <span className="text-sm text-muted-foreground font-mono">
-                    +{(localBoost ?? mixer.micBoost.value) * 12}dB
-                  </span>
-                </div>
-                <Slider
-                  id="input-boost"
-                  value={[localBoost ?? mixer.micBoost.value]}
-                  min={0}
-                  max={3}
-                  step={1}
-                  onValueChange={(v) => setLocalBoost(v[0])}
-                  onValueCommit={(v) => {
-                    setLocalBoost(null);
-                    updateMixer({ micBoost: v[0] });
-                  }}
-                  disabled={mixerLoading}
-                  aria-label="Input Boost"
-                />
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>0dB</span>
-                  <span>+12dB</span>
-                  <span>+24dB</span>
-                  <span>+36dB</span>
-                </div>
-              </div>
-            )}
-
-            {/* Input Source */}
-            {mixer?.inputSource && (
-              <div className="space-y-2">
-                <Label htmlFor="input-source">Input Source</Label>
-                <Select
-                  value={mixer.inputSource.current}
-                  onValueChange={(v) => updateMixer({ inputSource: v })}
-                  disabled={mixerLoading}
-                >
-                  <SelectTrigger id="input-source">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {mixer.inputSource.items.map((item) => (
-                      <SelectItem key={item} value={item}>
-                        {item}
-                      </SelectItem>
+              ) : (
+                <Tabs defaultValue={String(cardMixers[0].card)}>
+                  <TabsList className="w-full">
+                    {cardMixers.map((m) => (
+                      <TabsTrigger key={m.card} value={String(m.card)} className="flex-1">
+                        {m.cardName}
+                      </TabsTrigger>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </CardContent>
+                  </TabsList>
+                  {cardMixers.map((m) => (
+                    <TabsContent key={m.card} value={String(m.card)} className="pt-4">
+                      <CardMixer
+                        mixer={m}
+                        onUpdateMixer={updateMixer}
+                        loading={mixerLoading}
+                      />
+                    </TabsContent>
+                  ))}
+                </Tabs>
+              )}
+            </CardContent>
+          )}
         </Card>
 
         {/* Recordings List */}
