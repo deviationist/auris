@@ -1,54 +1,51 @@
 import { NextResponse } from "next/server";
-import { setCaptureMode, getSelectedDevice } from "@/lib/device-config";
-import { listCaptureDevices } from "@/lib/alsa";
-import { isActive, startUnit, restartUnit } from "@/lib/systemctl";
-import { getDb } from "@/lib/db";
-import { recordings } from "@/lib/db/schema";
-import { readdir, stat } from "fs/promises";
-import { join } from "path";
+import { setCaptureMode, setRecordStartedAt } from "@/lib/device-config";
+import { isActive, startUnit } from "@/lib/systemctl";
 
-const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
+async function waitForMount(
+  url: string,
+  timeoutMs: number = 5000
+): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const controller = new AbortController();
+      const res = await fetch(url, { signal: controller.signal });
+      controller.abort();
+      if (res.ok) return true;
+    } catch {
+      // not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
 
 export async function POST() {
   try {
-    const alsaId = await getSelectedDevice();
-    const devices = await listCaptureDevices();
-    const deviceName = devices.find((d) => d.alsaId === alsaId)?.name || alsaId;
+    const startedAt = Date.now();
     await setCaptureMode({ record: true });
+    await setRecordStartedAt(startedAt);
 
-    const active = await isActive("auris-capture");
-    if (active) {
-      await restartUnit("auris-capture");
-    } else {
-      await startUnit("auris-capture");
+    // Ensure stream is running (recording reads from Icecast)
+    const streamActive = await isActive("auris-stream");
+    if (!streamActive) {
+      await startUnit("auris-stream");
     }
 
-    // capture.sh creates files as YYYY-MM-DD_HH-MM-SS.mp3
-    // Wait for ffmpeg to create the file, then insert into DB
-    await new Promise((r) => setTimeout(r, 500));
-
-    const files = await readdir(RECORDINGS_DIR);
-    const mp3Files = files.filter((f) => f.endsWith(".mp3"));
-    const withStats = await Promise.all(
-      mp3Files.map(async (f) => ({
-        name: f,
-        mtime: (await stat(join(RECORDINGS_DIR, f))).mtimeMs,
-      }))
-    );
-    withStats.sort((a, b) => b.mtime - a.mtime);
-    const filename = withStats[0]?.name;
-
-    if (filename) {
-      const db = getDb();
-      await db
-        .insert(recordings)
-        .values({
-          filename,
-          device: deviceName,
-          createdAt: new Date(),
-        })
-        .onConflictDoNothing();
+    // Wait for Icecast mount to be available
+    const ready = await waitForMount("http://localhost:8000/mic");
+    if (!ready) {
+      return NextResponse.json(
+        { error: "Timed out waiting for Icecast mount" },
+        { status: 504 }
+      );
     }
+
+    // Start the recorder — the file won't appear on disk for several seconds
+    // (ffmpeg needs to connect to Icecast and buffer). The status API will
+    // detect the new file and insert it into the DB when it appears.
+    await startUnit("auris-record");
 
     return NextResponse.json({ ok: true });
   } catch (error) {

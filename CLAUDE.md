@@ -9,12 +9,18 @@ Browser (React/Next.js)
   ↕ API routes
 Next.js (port 3075) ──rewrite /stream/*──→ Icecast2 (port 8000, localhost)
   ↕ sudo systemctl                            ↑
-systemd: auris-capture                    ffmpeg (ALSA → MP3)
-  → capture.sh (reads /etc/default/auris)    ↑
-  → outputs to Icecast and/or file         Audio Input (USB/ALSA)
+systemd: auris-stream                    ffmpeg (ALSA → MP3)
+  → stream.sh (ALSA → Icecast)              ↑
+                                          Audio Input (USB/ALSA)
+systemd: auris-record
+  → record.sh (Icecast → file, -c copy)
 ```
 
-A single `auris-capture` service runs one ffmpeg process. State flags in `/etc/default/auris` (`CAPTURE_STREAM`, `CAPTURE_RECORD`) control whether ffmpeg outputs to Icecast, a recording file, or both. Toggling stream/record restarts the service with updated outputs (~1s dropout).
+Two independent systemd services:
+- **`auris-stream`**: ALSA → MP3 → Icecast. Runs when user is listening OR recording.
+- **`auris-record`**: Reads Icecast `http://localhost:8000/mic` with `-c copy` (no re-encoding). Only runs when recording.
+
+Toggling recording starts/stops only `auris-record` — the Icecast stream is never interrupted. Config flags `CAPTURE_STREAM` and `CAPTURE_RECORD` in `/etc/default/auris` track user intent (listening/recording) so the stream service knows when it's safe to stop.
 
 ## Tech Stack
 
@@ -39,10 +45,11 @@ A single `auris-capture` service runs one ffmpeg process. State flags in `/etc/d
 | `src/lib/db/schema.ts` | Drizzle ORM schema (recordings table) |
 | `src/lib/db/index.ts` | DB singleton, auto-migration, disk→DB sync |
 | `drizzle.config.ts` | Drizzle Kit config for migrations |
-| `capture.sh` | ffmpeg capture script (reads `/etc/default/auris`) |
+| `stream.sh` | ffmpeg ALSA → Icecast streaming script |
+| `record.sh` | ffmpeg Icecast → file recording script (-c copy) |
 | `scripts/generate-waveforms.mjs` | CLI: generate/clear waveform data in DB |
 | `src/app/api/` | All API routes (status, stream, record, audio, recordings) |
-| `system/` | systemd unit, icecast.xml, nginx config, sudoers |
+| `system/` | systemd units (auris-stream, auris-record), icecast.xml, nginx config, sudoers |
 | `next.config.ts` | Rewrites `/stream/*` → Icecast localhost:8000 |
 | `setup.sh` | Automated setup script (installs system packages, configs, builds) |
 | `ecosystem.config.js` | PM2 process manager config |

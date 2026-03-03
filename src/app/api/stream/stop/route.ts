@@ -1,18 +1,13 @@
 import { NextResponse } from "next/server";
-import { getCaptureMode, setCaptureMode } from "@/lib/device-config";
-import { isActive, stopUnit, restartUnit } from "@/lib/systemctl";
+import { setCaptureMode } from "@/lib/device-config";
+import { isActive, stopUnit } from "@/lib/systemctl";
 
 export async function POST() {
   try {
-    const mode = await getCaptureMode();
     await setCaptureMode({ stream: false });
-    const active = await isActive("auris-capture");
-    if (active) {
-      if (mode.record) {
-        await restartUnit("auris-capture");
-      } else {
-        await stopUnit("auris-capture");
-      }
+    const recording = await isActive("auris-record");
+    if (!recording) {
+      await stopUnit("auris-stream");
     }
     return NextResponse.json({ ok: true });
   } catch (error) {

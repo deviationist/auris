@@ -31,6 +31,9 @@
         <mount-name>/mic</mount-name>
         <fallback-mount>/silence.mp3</fallback-mount>
         <fallback-override>1</fallback-override>
+        <http-headers>
+            <header name="Access-Control-Allow-Origin" value="*" />
+        </http-headers>
     </mount>
 
     <fileserve>1</fileserve>

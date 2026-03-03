@@ -59,3 +59,19 @@ export async function setCaptureMode(mode: {
     config.CAPTURE_RECORD = mode.record ? "1" : "0";
   await writeConfig(config);
 }
+
+export async function getRecordStartedAt(): Promise<number | null> {
+  const config = await readConfig();
+  const val = parseInt(config.RECORD_STARTED_AT, 10);
+  return isNaN(val) ? null : val;
+}
+
+export async function setRecordStartedAt(ts: number | null): Promise<void> {
+  const config = await readConfig();
+  if (ts !== null) {
+    config.RECORD_STARTED_AT = String(ts);
+  } else {
+    delete config.RECORD_STARTED_AT;
+  }
+  await writeConfig(config);
+}

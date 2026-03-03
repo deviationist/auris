@@ -57,6 +57,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { LevelMeter } from "@/components/level-meter";
+import { LiveWaveform } from "@/components/live-waveform";
 import { WaveformPlayer } from "@/components/waveform-player";
 import {
   Tooltip,
@@ -68,6 +69,7 @@ interface Status {
   streaming: boolean;
   recording: boolean;
   recording_file: string | null;
+  recording_started: number | null;
 }
 
 interface Recording {
@@ -148,6 +150,7 @@ export default function Home() {
     streaming: false,
     recording: false,
     recording_file: null,
+    recording_started: null,
   });
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
@@ -164,6 +167,7 @@ export default function Home() {
   const [toneLoading, setToneLoading] = useState(false);
   const [toneConnected, setToneConnected] = useState(false);
   const [recordElapsed, setRecordElapsed] = useState(0);
+  const recordStartRef = useRef<number>(0);
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const [audioContextReady, setAudioContextReady] = useState(false);
@@ -228,20 +232,28 @@ export default function Home() {
     };
   }, [fetchStatus, fetchRecordings, fetchMixer, fetchDevices]);
 
-  // Recording elapsed timer — derive start time from the active recording's createdAt
+  // Recording elapsed timer — use recording_started from the status API (DB createdAt)
+  // so the timer survives page refreshes. Falls back to Date.now() if not yet available.
   useEffect(() => {
-    if (status.recording && status.recording_file) {
-      const activeRec = recordings?.find((r) => r.filename === status.recording_file);
-      const startTime = activeRec?.createdAt ?? Date.now();
+    if (status.recording) {
+      // Update ref when the API provides recording_started
+      if (status.recording_started && recordStartRef.current !== status.recording_started) {
+        recordStartRef.current = status.recording_started;
+      }
+      if (!recordStartRef.current) {
+        recordStartRef.current = Date.now();
+      }
+      const startTime = recordStartRef.current;
       setRecordElapsed(Math.floor((Date.now() - startTime) / 1000));
       const interval = setInterval(() => {
         setRecordElapsed(Math.floor((Date.now() - startTime) / 1000));
       }, 1000);
       return () => clearInterval(interval);
     } else {
+      recordStartRef.current = 0;
       setRecordElapsed(0);
     }
-  }, [status.recording, status.recording_file, recordings]);
+  }, [status.recording, status.recording_started]);
 
   // Clean up stream on page unload if we started it
   useEffect(() => {
@@ -305,8 +317,13 @@ export default function Home() {
         if (controller.signal.aborted) return;
       }
 
-      // Fetch fresh status — React state may be stale after cancel
-      let streaming = status.streaming;
+      // Always call stream/start to ensure CAPTURE_STREAM=1 flag is set
+      // (the stream may already be running if recording started it)
+      await fetch("/api/stream/start", { method: "POST", signal: controller.signal });
+      if (controller.signal.aborted) return;
+
+      // Check if stream is already up, otherwise wait for it
+      let streaming = false;
       try {
         const res = await fetch("/api/status", { signal: controller.signal });
         if (res.ok) streaming = (await res.json()).streaming;
@@ -315,7 +332,6 @@ export default function Home() {
       }
 
       if (!streaming) {
-        await fetch("/api/stream/start", { method: "POST", signal: controller.signal });
         listenInitiatedStreamRef.current = true;
         const ready = await waitForStream(5000, controller.signal);
         if (controller.signal.aborted) return;
@@ -324,10 +340,10 @@ export default function Home() {
           setListenLoading(false);
           return;
         }
-        await fetchStatus();
       } else {
-        listenInitiatedStreamRef.current = false;
+        listenInitiatedStreamRef.current = !status.recording;
       }
+      await fetchStatus();
       if (controller.signal.aborted) return;
       connectLiveAudio();
     } catch {
@@ -363,28 +379,15 @@ export default function Home() {
   }
 
   async function toggleRecord() {
-    const wasListening = liveConnected;
+    ensureAudioContext();
     setRecordLoading(true);
     try {
       const endpoint = status.recording
         ? "/api/record/stop"
         : "/api/record/start";
       await fetch(endpoint, { method: "POST" });
-      await new Promise((r) => setTimeout(r, 1000));
       await fetchStatus();
       await fetchRecordings();
-      // Service restart kills the Icecast connection — reconnect if we were listening
-      if (wasListening) {
-        const controller = new AbortController();
-        listenAbortRef.current = controller;
-        setLiveConnected(false);
-        setListenLoading(true);
-        setListenReconnecting(true);
-        await waitForStream(5000, controller.signal);
-        if (!controller.signal.aborted) {
-          connectLiveAudio();
-        }
-      }
     } finally {
       setRecordLoading(false);
     }
@@ -393,6 +396,11 @@ export default function Home() {
   function connectLiveAudio() {
     const audio = audioRef.current;
     if (!audio) return;
+    // Re-resume AudioContext — iOS may have suspended it during the
+    // async gap between the user gesture and the stream becoming ready.
+    if (audioContextRef.current?.state === "suspended") {
+      audioContextRef.current.resume();
+    }
     const streamUrl = process.env.NEXT_PUBLIC_STREAM_URL || "/stream/mic";
     audio.src = `${streamUrl}?t=${Date.now()}`;
     audio.load();
@@ -575,17 +583,10 @@ export default function Home() {
     if (alsaId === deviceState?.selected) return;
     setDeviceLoading(true);
     try {
-      // Stop listening and recording before switching device
       if (liveConnected) {
         disconnectLiveAudio();
       }
-      if (status.streaming) {
-        await fetch("/api/stream/stop", { method: "POST" });
-        listenInitiatedStreamRef.current = false;
-      }
-      if (status.recording) {
-        await fetch("/api/record/stop", { method: "POST" });
-      }
+      listenInitiatedStreamRef.current = false;
       await fetch("/api/audio/device", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -706,16 +707,33 @@ export default function Home() {
                 </Button>
               )}
               {status.recording && (
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  {status.recording_file && (
-                    <p className="font-mono truncate" role="status">
-                      {status.recording_file}
-                    </p>
-                  )}
-                  <span className="font-mono tabular-nums ml-auto" role="timer" aria-live="off">
-                    {formatDuration(recordElapsed)}
-                  </span>
-                </div>
+                <>
+                  {/* Mount waveform immediately (hidden) so it connects and buffers;
+                      show spinner overlay until the filename confirms the stream is live */}
+                  <div className="relative">
+                    <LiveWaveform
+                      active={status.recording}
+                      audioContext={audioContextReady ? audioContextRef.current : null}
+                      streamUrl="/stream/mic"
+                    />
+                    {!status.recording_file && (
+                      <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground/60 bg-background/80" role="status">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Starting stream...</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    {status.recording_file && (
+                      <p className="font-mono truncate" role="status">
+                        {status.recording_file}
+                      </p>
+                    )}
+                    <span className="font-mono tabular-nums ml-auto" role="timer" aria-live="off">
+                      {formatDuration(recordElapsed)}
+                    </span>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -799,6 +817,7 @@ export default function Home() {
 
               <audio
                 ref={audioRef}
+                crossOrigin="anonymous"
                 controls={liveConnected || toneConnected}
                 className={`live-audio ${liveConnected || toneConnected ? "w-full h-8" : "hidden"}`}
                 aria-label="Live audio stream"
@@ -808,6 +827,7 @@ export default function Home() {
                   audioElement={audioRef.current}
                   audioContext={audioContextReady ? audioContextRef.current : null}
                   active={liveConnected || toneConnected}
+                  streamUrl="/stream/mic"
                 />
               </div>
             </CardContent>

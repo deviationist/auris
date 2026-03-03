@@ -1,7 +1,11 @@
-trym ALL=(ALL) NOPASSWD: /usr/bin/systemctl start auris-capture, \
-                             /usr/bin/systemctl stop auris-capture, \
-                             /usr/bin/systemctl restart auris-capture, \
-                             /usr/bin/systemctl is-active auris-capture, \
+trym ALL=(ALL) NOPASSWD: /usr/bin/systemctl start auris-stream, \
+                             /usr/bin/systemctl stop auris-stream, \
+                             /usr/bin/systemctl restart auris-stream, \
+                             /usr/bin/systemctl is-active auris-stream, \
+                             /usr/bin/systemctl start auris-record, \
+                             /usr/bin/systemctl stop auris-record, \
+                             /usr/bin/systemctl restart auris-record, \
+                             /usr/bin/systemctl is-active auris-record, \
                              /usr/bin/systemctl daemon-reload, \
                              /usr/bin/amixer -c *, \
                              /usr/bin/arecord -l, \

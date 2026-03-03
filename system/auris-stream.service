@@ -1,10 +1,10 @@
 [Unit]
-Description=Auris audio capture (stream and/or record)
+Description=Auris audio stream (ALSA to Icecast)
 After=network.target icecast2.service
 
 [Service]
 Type=simple
-ExecStart=/opt/auris/capture.sh
+ExecStart=/opt/auris/stream.sh
 Restart=on-failure
 RestartSec=5
 

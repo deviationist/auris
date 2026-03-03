@@ -1,0 +1,12 @@
+[Unit]
+Description=Auris audio recorder (Icecast to file)
+After=auris-stream.service
+
+[Service]
+Type=simple
+ExecStart=/opt/auris/record.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -33,10 +33,10 @@ export async function DELETE() {
 
 export async function POST() {
   try {
-    const active = await isActive("auris-capture");
+    const active = await isActive("auris-stream");
     if (active) {
       return NextResponse.json(
-        { error: "Capture is active — stop it before sending a test tone" },
+        { error: "Stream is active — stop it before sending a test tone" },
         { status: 409 }
       );
     }

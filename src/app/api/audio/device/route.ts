@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { setSelectedDevice } from "@/lib/device-config";
-import { isActive, restartUnit } from "@/lib/systemctl";
+import { isActive, stopUnit, startUnit } from "@/lib/systemctl";
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,11 +15,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const [streamWasActive, recordActive] = await Promise.all([
+      isActive("auris-stream"),
+      isActive("auris-record"),
+    ]);
+
+    // Stop both services before changing device
+    if (recordActive) await stopUnit("auris-record");
+    if (streamWasActive) await stopUnit("auris-stream");
+
     await setSelectedDevice(alsaId);
 
-    // Restart capture service if running so it picks up the new device
-    const active = await isActive("auris-capture");
-    if (active) await restartUnit("auris-capture");
+    // Restart stream if it was running
+    if (streamWasActive) await startUnit("auris-stream");
 
     return NextResponse.json({ ok: true, device: alsaId });
   } catch (error) {

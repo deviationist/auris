@@ -57,15 +57,16 @@ echo "==> Installing Icecast2 config..."
 sudo cp "$APP_DIR/system/icecast.xml" /etc/icecast2/icecast.xml
 sudo systemctl restart icecast2 || sudo /etc/init.d/icecast2 restart
 
-# --- Install systemd units ---
-echo "==> Installing systemd unit..."
-sudo cp "$APP_DIR/system/auris-capture.service" /etc/systemd/system/
-sudo systemctl daemon-reload
+# --- Stop and remove old auris-capture service ---
+echo "==> Removing old auris-capture service (if present)..."
+sudo systemctl stop auris-capture 2>/dev/null || true
+sudo systemctl disable auris-capture 2>/dev/null || true
+sudo rm -f /etc/systemd/system/auris-capture.service
 
-# Stop and disable old services if present
-sudo systemctl stop auris-stream auris-record 2>/dev/null || true
-sudo systemctl disable auris-stream auris-record 2>/dev/null || true
-sudo rm -f /etc/systemd/system/auris-stream.service /etc/systemd/system/auris-record.service
+# --- Install systemd units ---
+echo "==> Installing systemd units..."
+sudo cp "$APP_DIR/system/auris-stream.service" /etc/systemd/system/
+sudo cp "$APP_DIR/system/auris-record.service" /etc/systemd/system/
 sudo systemctl daemon-reload
 
 # --- Install sudoers ---
@@ -83,8 +84,8 @@ else
   exit 1
 fi
 
-# --- Make capture script executable ---
-chmod +x "$APP_DIR/capture.sh"
+# --- Make capture scripts executable ---
+chmod +x "$APP_DIR/stream.sh" "$APP_DIR/record.sh"
 
 # --- Build Next.js ---
 echo "==> Installing npm dependencies..."
