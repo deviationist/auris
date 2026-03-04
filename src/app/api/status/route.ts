@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { isActive } from "@/lib/systemctl";
-import { getRecordDevice, getRecordStartedAt } from "@/lib/device-config";
+import { getRecordDevice, getRecordStartedAt, getRecordChunkMinutes } from "@/lib/device-config";
 import { listCaptureDevices } from "@/lib/alsa";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { readdir, stat } from "fs/promises";
 import { join } from "path";
+import { scheduleChunk, hasChunkTimer } from "@/lib/record-chunker";
 
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
 
@@ -91,7 +92,14 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({ streaming, recording, recording_file, recording_started });
+    const record_chunk_minutes = await getRecordChunkMinutes();
+
+    // Recover chunk timer after server restart (e.g. PM2 reload)
+    if (recording && record_chunk_minutes > 0 && recording_started && !hasChunkTimer()) {
+      scheduleChunk(record_chunk_minutes, recording_started);
+    }
+
+    return NextResponse.json({ streaming, recording, recording_file, recording_started, record_chunk_minutes });
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to get status", detail: String(error) },

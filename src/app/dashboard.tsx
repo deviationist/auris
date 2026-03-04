@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import {
@@ -21,10 +21,12 @@ import {
   LogOut,
   Mic,
   Keyboard,
+  Search,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -88,6 +90,7 @@ interface Status {
   recording: boolean;
   recording_file: string | null;
   recording_started: number | null;
+  record_chunk_minutes: number;
 }
 
 interface Recording {
@@ -116,6 +119,13 @@ interface DeviceState {
 }
 
 const BITRATE_OPTIONS = ["64k", "96k", "128k", "192k", "256k", "320k"];
+const CHUNK_OPTIONS = [
+  { value: "0", label: "Off" },
+  { value: "30", label: "30 min" },
+  { value: "60", label: "1 hour" },
+  { value: "120", label: "2 hours" },
+  { value: "240", label: "4 hours" },
+];
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -153,6 +163,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     recording: false,
     recording_file: null,
     recording_started: null,
+    record_chunk_minutes: 0,
   });
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
@@ -170,6 +181,10 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const [toneLoading, setToneLoading] = useState(false);
   const [toneConnected, setToneConnected] = useState(false);
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
+  const [recordingsSearch, setRecordingsSearch] = useState("");
+  const [recordingsDateFilter, setRecordingsDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [recordingsPageSize, setRecordingsPageSize] = useState(20);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   const [recordElapsed, setRecordElapsed] = useState(0);
   const recordStartRef = useRef<number>(0);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -716,6 +731,69 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     }
   }
 
+  async function setChunkMinutes(value: string) {
+    const minutes = parseInt(value, 10);
+    if (minutes === status.record_chunk_minutes) return;
+    try {
+      await fetch("/api/audio/chunk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ minutes }),
+      });
+      await fetchStatus();
+    } catch {
+      // ignore
+    }
+  }
+
+  const filteredRecordings = useMemo(() => {
+    if (!recordings) return null;
+    let filtered = recordings;
+
+    if (recordingsSearch.trim()) {
+      const q = recordingsSearch.trim().toLowerCase();
+      filtered = filtered.filter(r => r.filename.toLowerCase().includes(q));
+    }
+
+    if (recordingsDateFilter !== "all") {
+      const now = Date.now();
+      const cutoff = {
+        today: now - 24 * 60 * 60 * 1000,
+        "7d": now - 7 * 24 * 60 * 60 * 1000,
+        "30d": now - 30 * 24 * 60 * 60 * 1000,
+      }[recordingsDateFilter];
+      filtered = filtered.filter(r => r.createdAt >= cutoff);
+    }
+
+    return filtered;
+  }, [recordings, recordingsSearch, recordingsDateFilter]);
+
+  const visibleRecordings = useMemo(
+    () => filteredRecordings?.slice(0, recordingsPageSize) ?? null,
+    [filteredRecordings, recordingsPageSize]
+  );
+
+  // Reset page size when filters change
+  useEffect(() => {
+    setRecordingsPageSize(20);
+  }, [recordingsSearch, recordingsDateFilter]);
+
+  // IntersectionObserver for infinite scroll
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setRecordingsPageSize(prev => prev + 20);
+        }
+      },
+      { threshold: 0 }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [filteredRecordings]);
+
   return (
     <main id="main" className="min-h-screen bg-background p-6 md:p-10">
       <div className="mx-auto max-w-4xl space-y-6">
@@ -878,6 +956,23 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                               {BITRATE_OPTIONS.map((b) => (
                                 <SelectItem key={b} value={b}>
                                   {b}bps{b === "128k" ? " (default)" : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-sm font-medium pt-2">Max Duration</p>
+                          <Select
+                            value={String(status.record_chunk_minutes)}
+                            onValueChange={setChunkMinutes}
+                            disabled={deviceLoading || status.recording}
+                          >
+                            <SelectTrigger className="text-xs h-8" aria-label="Max recording duration">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CHUNK_OPTIONS.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -1254,6 +1349,47 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                 No recordings yet.
               </p>
             ) : (
+              <>
+              <div className="flex flex-col sm:flex-row gap-2 mb-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search recordings..."
+                    value={recordingsSearch}
+                    onChange={(e) => setRecordingsSearch(e.target.value)}
+                    className="pl-9 pr-8 h-9"
+                  />
+                  {recordingsSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setRecordingsSearch("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label="Clear search"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-1">
+                  {(["all", "today", "7d", "30d"] as const).map((preset) => (
+                    <Button
+                      key={preset}
+                      variant={recordingsDateFilter === preset ? "secondary" : "outline"}
+                      size="sm"
+                      className="h-9 px-3 text-xs"
+                      onClick={() => setRecordingsDateFilter(preset)}
+                    >
+                      {preset === "all" ? "All" : preset === "today" ? "Today" : preset}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              {filteredRecordings && filteredRecordings.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No recordings match your filters.
+                </p>
+              ) : (
+              <>
               <Table>
                 <TableCaption className="sr-only">List of recorded audio files</TableCaption>
                 <TableHeader>
@@ -1267,7 +1403,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {recordings.map((rec) => {
+                  {visibleRecordings?.map((rec) => {
                     const isActive = status.recording && rec.filename === status.recording_file;
                     const isPlaying = playingFile === rec.filename;
                     return (
@@ -1391,6 +1527,16 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                   })}
                 </TableBody>
               </Table>
+              <div ref={sentinelRef} />
+              {filteredRecordings && visibleRecordings && (
+                <p className="text-xs text-muted-foreground text-center pt-2">
+                  Showing {visibleRecordings.length} of {filteredRecordings.length} recording{filteredRecordings.length !== 1 ? "s" : ""}
+                  {(recordingsSearch || recordingsDateFilter !== "all") && recordings ? ` (${recordings.length} total)` : ""}
+                </p>
+              )}
+              </>
+              )}
+              </>
             )}
           </CardContent>
           )}

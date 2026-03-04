@@ -1,15 +1,9 @@
 import { NextResponse } from "next/server";
-import { setCaptureMode, setRecordStartedAt } from "@/lib/device-config";
-import { startUnit } from "@/lib/systemctl";
+import { startRecording } from "@/lib/record-actions";
 
 export async function POST() {
   try {
-    const startedAt = Date.now();
-    await setCaptureMode({ record: true });
-    await setRecordStartedAt(startedAt);
-
-    await startUnit("auris-record");
-
+    await startRecording();
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

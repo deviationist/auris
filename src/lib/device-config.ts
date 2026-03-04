@@ -113,3 +113,35 @@ export async function setRecordStartedAt(ts: number | null): Promise<void> {
   }
   await writeConfig(config);
 }
+
+export async function getRecordChunkPart(): Promise<number> {
+  const config = await readConfig();
+  const val = parseInt(config.RECORD_CHUNK_PART, 10);
+  return isNaN(val) ? 0 : val;
+}
+
+export async function setRecordChunkPart(part: number | null): Promise<void> {
+  const config = await readConfig();
+  if (part !== null && part > 0) {
+    config.RECORD_CHUNK_PART = String(part);
+  } else {
+    delete config.RECORD_CHUNK_PART;
+  }
+  await writeConfig(config);
+}
+
+export async function getRecordChunkMinutes(): Promise<number> {
+  const config = await readConfig();
+  const val = parseInt(config.RECORD_CHUNK_MINUTES, 10);
+  return isNaN(val) ? 0 : val;
+}
+
+export async function setRecordChunkMinutes(minutes: number): Promise<void> {
+  const config = await readConfig();
+  if (minutes > 0) {
+    config.RECORD_CHUNK_MINUTES = String(minutes);
+  } else {
+    delete config.RECORD_CHUNK_MINUTES;
+  }
+  await writeConfig(config);
+}
