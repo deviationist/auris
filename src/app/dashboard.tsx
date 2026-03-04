@@ -152,6 +152,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null);
   const [mixerLoading, setMixerLoading] = useState(false);
   const [mixerOpen, setMixerOpen] = useState(false);
+  const [recordingsOpen, setRecordingsOpen] = useState(true);
   const [deviceLoading, setDeviceLoading] = useState(false);
   const [liveConnected, setLiveConnected] = useState(false);
   const [listenLoading, setListenLoading] = useState(false);
@@ -1109,17 +1110,29 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
           )}
         </Card>
 
-        {/* Recordings List */}
+        {/* Recordings List (collapsible) */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg" role="heading" aria-level={2}>Recordings</CardTitle>
-            <CardDescription>
-              {recordings === null
-                ? "Loading recordings..."
-                : `${recordings.length} recording${recordings.length !== 1 ? "s" : ""} available`}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between px-6 text-left cursor-pointer"
+            onClick={() => setRecordingsOpen((o) => !o)}
+            aria-expanded={recordingsOpen}
+            aria-controls="recordings-panel"
+          >
+            <div>
+              <CardTitle className="text-lg" role="heading" aria-level={2}>Recordings</CardTitle>
+              <CardDescription>
+                {recordings === null
+                  ? "Loading recordings..."
+                  : `${recordings.length} recording${recordings.length !== 1 ? "s" : ""} available`}
+              </CardDescription>
+            </div>
+            <ChevronDown
+              className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${recordingsOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {recordingsOpen && (
+          <CardContent id="recordings-panel">
             {recordings === null ? (
               <div className="flex justify-center py-4" role="status" aria-live="polite">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" />
@@ -1269,6 +1282,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               </Table>
             )}
           </CardContent>
+          )}
         </Card>
 
       </div>
