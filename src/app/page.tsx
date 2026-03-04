@@ -17,7 +17,9 @@ import {
   X,
   Cog,
   ChevronDown,
+  LogOut,
 } from "lucide-react";
+import { signOut, useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -133,7 +135,9 @@ function formatDate(ms: number): string {
 
 
 export default function Home() {
+  const { data: session } = useSession();
   const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
   const [statusLoaded, setStatusLoaded] = useState(false);
   const [status, setStatus] = useState<Status>({
     streaming: false,
@@ -204,6 +208,8 @@ export default function Home() {
       // ignore
     }
   }, []);
+
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     fetchStatus();
@@ -664,16 +670,33 @@ export default function Home() {
           <span className="text-sm pt-1 text-muted-foreground">
             Audio Monitor
           </span>
-          <div className="ml-auto">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            >
-              <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-              <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-              <span className="sr-only">Toggle theme</span>
-            </Button>
+          <div className="ml-auto flex items-center gap-1">
+            {mounted && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              >
+                <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+                <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+              </Button>
+            )}
+            {session && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => signOut()}
+                  >
+                    <LogOut className="h-5 w-5" />
+                    <span className="sr-only">Sign out</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Sign out</TooltipContent>
+              </Tooltip>
+            )}
           </div>
         </div>
 
@@ -832,10 +855,11 @@ export default function Home() {
                         className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground cursor-pointer bg-background/80 hover:bg-background/60 transition-colors"
                         role="button"
                         tabIndex={0}
+                        aria-label="Connect live waveform"
                         onClick={ensureAudioContext}
                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") ensureAudioContext(); }}
                       >
-                        <AudioWaveform className="h-4 w-4" />
+                        <AudioWaveform className="h-4 w-4" aria-hidden="true" />
                         <span>Tap to connect waveform</span>
                       </div>
                     )}
@@ -1018,6 +1042,7 @@ export default function Home() {
             className="flex w-full items-center justify-between px-6 text-left cursor-pointer"
             onClick={() => setMixerOpen((o) => !o)}
             aria-expanded={mixerOpen}
+            aria-controls="mixer-panel"
           >
             <div>
               <CardTitle className="text-lg" role="heading" aria-level={2}>Mixer</CardTitle>
@@ -1028,7 +1053,7 @@ export default function Home() {
             />
           </button>
           {mixerOpen && (
-            <CardContent className="pt-0">
+            <CardContent id="mixer-panel" className="pt-0">
               {cardMixers === null ? (
                 <div className="flex items-center gap-2 h-9 px-3 text-sm text-muted-foreground" role="status" aria-live="polite">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />

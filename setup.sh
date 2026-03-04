@@ -52,6 +52,56 @@ else
   echo "==> /etc/default/auris already exists, skipping"
 fi
 
+# --- Set up authentication credentials ---
+if grep -q '^AUTH_USERNAME=' /etc/default/auris 2>/dev/null && grep -q '^AUTH_PASSWORD_HASH=' /etc/default/auris 2>/dev/null; then
+  echo "==> Auth credentials already configured, skipping"
+else
+  echo "==> Setting up authentication (leave password empty to skip)..."
+  read -rp "    Auth username [admin]: " AUTH_USER
+  AUTH_USER="${AUTH_USER:-admin}"
+
+  read -rsp "    Auth password (empty = no auth): " AUTH_PASS
+  echo ""
+
+  if [ -z "$AUTH_PASS" ]; then
+    echo "    Skipping auth — app will run without login"
+  else
+    while true; do
+      read -rsp "    Confirm password: " AUTH_PASS_CONFIRM
+      echo ""
+      if [ "$AUTH_PASS" != "$AUTH_PASS_CONFIRM" ]; then
+        echo "    Passwords do not match. Try again."
+        read -rsp "    Auth password: " AUTH_PASS
+        echo ""
+        continue
+      fi
+      break
+    done
+
+    AUTH_HASH=$(AUTH_PASS="$AUTH_PASS" node -e "require('bcryptjs').hash(process.env.AUTH_PASS, 10).then(h => process.stdout.write(h))")
+    # Remove any existing partial auth config
+    sudo sed -i '/^AUTH_USERNAME=/d; /^AUTH_PASSWORD_HASH=/d' /etc/default/auris
+    echo "AUTH_USERNAME=$AUTH_USER" | sudo tee -a /etc/default/auris > /dev/null
+    echo "AUTH_PASSWORD_HASH='$AUTH_HASH'" | sudo tee -a /etc/default/auris > /dev/null
+    echo "    Auth credentials saved to /etc/default/auris"
+  fi
+fi
+
+# --- Set up .env.local ---
+if [ -f "$APP_DIR/.env.local" ] && grep -q '^AUTH_SECRET=' "$APP_DIR/.env.local" 2>/dev/null; then
+  echo "==> AUTH_SECRET already set in .env.local, skipping"
+else
+  echo "==> Generating AUTH_SECRET in .env.local..."
+  AUTH_SECRET=$(openssl rand -base64 32)
+  if [ -f "$APP_DIR/.env.local" ]; then
+    # Remove existing AUTH_SECRET/AUTH_TRUST_HOST if present
+    sed -i '/^AUTH_SECRET=/d; /^AUTH_TRUST_HOST=/d' "$APP_DIR/.env.local"
+  fi
+  echo "AUTH_SECRET=$AUTH_SECRET" >> "$APP_DIR/.env.local"
+  echo "AUTH_TRUST_HOST=true" >> "$APP_DIR/.env.local"
+  echo "    AUTH_SECRET generated"
+fi
+
 # --- Install Icecast config ---
 echo "==> Installing Icecast2 config..."
 sudo cp "$APP_DIR/system/icecast.xml" /etc/icecast2/icecast.xml

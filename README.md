@@ -9,24 +9,29 @@ Audio monitoring and recording web application. Streams live audio via Icecast2 
 ```
 Browser  ──>  Nginx (:80/:443)  ──>  Next.js (:3075)   ── API ──>  systemctl start/stop
                    │                     │                              │
-                   │                     │ SQLite DB               auris-capture
-                   │                     │ (recording metadata)    (single ffmpeg process)
-                   │                     │                              │
-                   └── /stream/ ───>  Icecast2 (:8000)  <───────────────┘
+                   │                     │ Auth.js (optional)     auris-stream  auris-record
+                   │                     │ SQLite DB              (ALSA→Icecast) (Icecast→file)
+                   │                     │ (recording metadata)         │
+                   └── /stream/ ───>  Icecast2 (:8000)  <──────────────┘
                                                                         │
                                                                   Audio Source
                                                                  (ALSA capture)
 ```
 
 - **Next.js** (app router, TypeScript, Tailwind, shadcn/ui) — web UI + API routes
+- **Auth.js v5** (next-auth) — optional username/password authentication with JWT sessions
 - **SQLite** (better-sqlite3, Drizzle ORM) — recording metadata and device info
 - **Icecast2** — audio streaming server (localhost only, proxied by Nginx)
 - **ffmpeg** — captures ALSA audio for streaming and/or recording
-- **systemd** — manages the capture process (`auris-capture` service)
+- **systemd** — manages capture processes (`auris-stream`, `auris-record` services)
 - **Nginx** — reverse proxy under a single hostname
 - **PM2** — process manager for the Next.js production server
 
-A single `auris-capture` service runs one ffmpeg process. State flags in `/etc/default/auris` (`CAPTURE_STREAM`, `CAPTURE_RECORD`) control whether ffmpeg outputs to Icecast, a recording file, or both. Toggling stream/record restarts the service with updated outputs (~1s dropout).
+Two independent systemd services:
+- **`auris-stream`**: ALSA → MP3 → Icecast. Runs when user is listening OR recording.
+- **`auris-record`**: Reads Icecast stream with `-c copy` (no re-encoding). Only runs when recording.
+
+Toggling recording starts/stops only `auris-record` — the Icecast stream is never interrupted.
 
 ## Quick setup
 
@@ -42,8 +47,10 @@ This will:
 - Symlink the project to `/opt/auris`
 - Create recordings directory and SQLite data directory
 - Install `/etc/default/auris` config file
+- Set up authentication (optional — leave password empty to skip)
+- Generate `AUTH_SECRET` in `.env.local`
 - Install Icecast2 config
-- Install systemd unit and sudoers
+- Install systemd units and sudoers
 - Build the Next.js app
 
 After running the script, follow the printed "Next steps" to configure the ALSA device and start PM2/Nginx.
@@ -98,9 +105,13 @@ This means the device is `plughw:1,0`. You can select it from the web UI (Audio 
 ### 3. Configure system
 
 ```bash
-# Install config file
-sudo cp /etc/default/auris.example /etc/default/auris  # or create manually
-# Edit /etc/default/auris to set ALSA_DEVICE, RECORDINGS_DIR, etc.
+# Create config file
+sudo tee /etc/default/auris > /dev/null <<EOF
+ALSA_DEVICE=plughw:1,0
+CAPTURE_STREAM=0
+CAPTURE_RECORD=0
+RECORDINGS_DIR=/recordings
+EOF
 
 # Install Icecast config
 sudo cp system/icecast.xml /etc/icecast2/icecast.xml
@@ -112,11 +123,12 @@ Default Icecast credentials (change in `system/icecast.xml` if needed):
 - Source password: `sourcepass`
 - Admin password: `adminpass`
 
-### 4. Install systemd unit and sudoers
+### 4. Install systemd units and sudoers
 
 ```bash
-# Install the capture service
-sudo cp system/auris-capture.service /etc/systemd/system/
+# Install services
+sudo cp system/auris-stream.service /etc/systemd/system/
+sudo cp system/auris-record.service /etc/systemd/system/
 sudo systemctl daemon-reload
 
 # Install sudoers (replace "trym" with your username)
@@ -126,7 +138,19 @@ sudo chmod 440 /etc/sudoers.d/auris
 sudo visudo -c   # must print "parsed OK"
 ```
 
-### 5. Build and start with PM2
+### 5. Set up authentication (optional)
+
+Authentication is optional. To enable it:
+
+```bash
+npm run auth:set
+```
+
+This prompts for a username and password, stores the bcrypt hash in `/etc/default/auris`, and generates `AUTH_SECRET` in `.env.local`. Leave the password empty to disable auth.
+
+When enabled, all routes (GUI, API, `/stream/*`) require login. Sessions last 30 days.
+
+### 6. Build and start with PM2
 
 ```bash
 npm run build
@@ -135,7 +159,7 @@ pm2 save
 pm2 startup   # follow the printed command to enable on boot
 ```
 
-### 6. Configure Nginx (optional)
+### 7. Configure Nginx (optional)
 
 If you want to access the app via a hostname like `mic.trym` on port 80:
 
@@ -153,7 +177,7 @@ Add the hostname to DNS or `/etc/hosts` on machines that need to reach it:
 
 Without Nginx, the app is available directly at `http://<server>:3075`.
 
-### 7. Verify
+### 8. Verify
 
 1. Open the web UI in a browser
 2. Click **Start Recording** — the badge should turn red and a REC indicator appears in the recordings table
@@ -168,6 +192,7 @@ npm run dev                    # starts Next.js on port 3000 with hot reload
 npm run build                  # production build
 npm run start                  # production server
 npm run stop                   # kill process on port 3000
+npm run auth:set               # set or disable auth credentials
 npm run db:generate            # generate DB migrations after schema changes
 npm run db:push                # push schema directly to DB (dev only)
 npm run waveforms:generate     # generate missing waveforms
@@ -182,12 +207,19 @@ The API routes will work in dev mode as long as the systemd unit and sudoers are
 ```
 auris/
 ├── src/
+│   ├── auth.ts                         # Auth.js v5 config (Credentials, JWT)
+│   ├── proxy.ts                        # Route protection proxy (auth gate)
 │   ├── app/
 │   │   ├── page.tsx                    # Main dashboard UI
-│   │   ├── layout.tsx                  # Root layout (ThemeProvider)
+│   │   ├── layout.tsx                  # Root layout (SessionProvider, ThemeProvider)
+│   │   ├── login/page.tsx              # Login page
+│   │   ├── stream/[...path]/route.ts  # Proxies /stream/* to Icecast
 │   │   ├── globals.css                 # Tailwind + shadcn/ui theme (light/dark)
 │   │   └── api/
 │   │       ├── status/route.ts         # GET  — stream/record status
+│   │       ├── auth/
+│   │       │   ├── [...nextauth]/route.ts  # Auth.js route handler
+│   │       │   └── enabled/route.ts    # GET  — check if auth is enabled
 │   │       ├── stream/
 │   │       │   ├── start/route.ts      # POST — start streaming
 │   │       │   ├── stop/route.ts       # POST — stop streaming
@@ -197,47 +229,69 @@ auris/
 │   │       │   └── stop/route.ts       # POST — stop recording (updates DB row)
 │   │       ├── recordings/
 │   │       │   ├── route.ts            # GET  — list recordings from DB
-│   │       │   └── [filename]/route.ts # GET  — stream file, DELETE — remove
+│   │       │   └── [filename]/
+│   │       │       ├── route.ts        # GET  — stream file, DELETE — remove
+│   │       │       └── waveform/route.ts # GET — waveform peaks data
 │   │       └── audio/
 │   │           ├── devices/route.ts    # GET  — list ALSA capture devices
 │   │           ├── device/route.ts     # POST — select capture device
-│   │           └── mixer/route.ts      # GET/POST — read/set mixer levels
+│   │           ├── bitrate/route.ts    # GET/POST — stream/record bitrate
+│   │           ├── mixer/route.ts      # GET/POST — read/set mixer levels
+│   │           └── mixer/all/route.ts  # GET — all mixer controls per card
 │   ├── components/
 │   │   ├── ui/                         # shadcn/ui components (do not edit)
+│   │   ├── login-form.tsx              # Login form (client component)
 │   │   ├── level-meter.tsx             # WebAudio RMS/dB level meter
+│   │   ├── live-waveform.tsx           # Real-time waveform visualization
 │   │   ├── waveform-player.tsx         # Canvas waveform player with seek, play/pause
+│   │   ├── card-mixer.tsx              # ALSA mixer card component
 │   │   └── theme-provider.tsx          # next-themes wrapper
 │   └── lib/
 │       ├── utils.ts                    # cn() helper
 │       ├── systemctl.ts                # systemctl wrapper
 │       ├── alsa.ts                     # ALSA device & mixer operations
-│       ├── device-config.ts            # /etc/default/auris read/write
+│       ├── device-config.ts            # /etc/default/auris read/write (devices, capture)
+│       ├── auth-config.ts              # /etc/default/auris read (auth credentials)
 │       ├── waveform.ts                 # Waveform generation (ffmpeg PCM → peaks)
 │       └── db/
 │           ├── schema.ts               # Drizzle schema (recordings table)
 │           └── index.ts                # DB singleton, migrations, sync
 ├── scripts/
-│   └── generate-waveforms.mjs          # CLI: generate/clear waveform data in DB
+│   ├── generate-waveforms.mjs          # CLI: generate/clear waveform data in DB
+│   └── set-auth.mjs                    # CLI: set/disable auth credentials
 ├── drizzle/                            # Generated DB migrations
 ├── data/                               # SQLite database (auris.db)
 ├── system/
-│   ├── auris-capture.service           # systemd: single ffmpeg process
+│   ├── auris-stream.service            # systemd: ALSA → Icecast streaming
+│   ├── auris-record.service            # systemd: Icecast → file recording
 │   ├── auris-sudoers                   # sudoers for passwordless control
 │   ├── icecast.xml                     # Icecast2 config
 │   └── nginx-auris.conf               # Nginx reverse proxy config
-├── capture.sh                          # ffmpeg capture script
+├── stream.sh                           # ffmpeg ALSA → Icecast script
+├── record.sh                           # ffmpeg Icecast → file script (-c copy)
 ├── drizzle.config.ts                   # Drizzle Kit config
 ├── ecosystem.config.js                 # PM2 config
 ├── setup.sh                            # Automated setup script
-└── .env.local                          # Environment variables
+├── .env.example                        # Example environment variables
+└── .env.local                          # Environment variables (AUTH_SECRET, etc.)
 ```
 
 ## Configuration
 
 | File | What to change |
 |---|---|
-| `/etc/default/auris` | `ALSA_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR` |
-| `.env.local` | `RECORDINGS_DIR`, `DATABASE_PATH`, `NEXT_PUBLIC_STREAM_URL` |
+| `/etc/default/auris` | `ALSA_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH` |
+| `.env.local` | `RECORDINGS_DIR`, `DATABASE_PATH`, `NEXT_PUBLIC_STREAM_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST` (see `.env.example`) |
 | `system/icecast.xml` | Passwords, listen address |
 | `system/nginx-auris.conf` | `server_name` hostname |
 | `system/auris-sudoers` | Username |
+
+### Authentication
+
+Auth is optional. When `AUTH_USERNAME` and `AUTH_PASSWORD_HASH` are set in `/etc/default/auris`, all routes require login. When omitted, the app runs without authentication.
+
+```bash
+npm run auth:set    # interactive: set username/password or disable auth
+```
+
+Sessions use JWT tokens (30-day expiry). `AUTH_SECRET` in `.env.local` is required when auth is enabled (generated automatically by `setup.sh` or `auth:set`).
