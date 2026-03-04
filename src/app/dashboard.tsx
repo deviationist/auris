@@ -20,6 +20,7 @@ import {
   ChevronDown,
   LogOut,
   Mic,
+  Keyboard,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { toast } from "sonner";
@@ -64,6 +65,13 @@ import { LevelMeter } from "@/components/level-meter";
 import { LiveWaveform } from "@/components/live-waveform";
 import { WaveformPlayer } from "@/components/waveform-player";
 import { CardMixer, type CardMixerState } from "@/components/card-mixer";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Popover,
   PopoverContent,
@@ -148,6 +156,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   });
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
+  const [stopRecordDialogOpen, setStopRecordDialogOpen] = useState(false);
   const [playingFile, setPlayingFile] = useState<string | null>(null);
   const [cardMixers, setCardMixers] = useState<CardMixerState[] | null>(null);
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null);
@@ -160,6 +169,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const [listenReconnecting, setListenReconnecting] = useState(false);
   const [toneLoading, setToneLoading] = useState(false);
   const [toneConnected, setToneConnected] = useState(false);
+  const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
   const [recordElapsed, setRecordElapsed] = useState(0);
   const recordStartRef = useRef<number>(0);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -282,6 +292,48 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     };
   }, [status.recording]);
 
+  // Keyboard shortcuts: R = toggle recording, L = toggle listening, T = test tone
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if ((e.target as HTMLElement)?.isContentEditable) return;
+      if (document.querySelector("[data-radix-popper-content-wrapper]") || document.querySelector("[role=\"dialog\"]")) return;
+
+      const key = e.key.toLowerCase();
+      if (key === "r") {
+        e.preventDefault();
+        if (recordLoading) return;
+        if (status.recording) {
+          setStopRecordDialogOpen(true);
+        } else {
+          toggleRecord();
+        }
+      } else if (key === "l") {
+        e.preventDefault();
+        if (toneLoading) return;
+        if (listenLoading) {
+          cancelListening();
+        } else if (liveConnected) {
+          stopListening();
+        } else {
+          startListening();
+        }
+      } else if (key === "t") {
+        e.preventDefault();
+        if (status.recording || listenLoading) return;
+        if (toneLoading) {
+          cancelTestTone();
+        } else {
+          sendTestTone();
+        }
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [status.recording, recordLoading, listenLoading, liveConnected, toneLoading]);
+
   function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
       const timer = setTimeout(resolve, ms);
@@ -394,14 +446,16 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
 
   async function toggleRecord() {
     ensureAudioContext();
+    const wasRecording = status.recording;
     setRecordLoading(true);
     try {
-      const endpoint = status.recording
+      const endpoint = wasRecording
         ? "/api/record/stop"
         : "/api/record/start";
       await fetch(endpoint, { method: "POST" });
       await fetchStatus();
       await fetchRecordings();
+      toast.success(wasRecording ? "Recording stopped" : "Recording started");
     } finally {
       setRecordLoading(false);
     }
@@ -673,21 +727,65 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
             Audio Monitor
           </span>
           <div className="ml-auto flex items-center gap-1">
-            {mounted ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              >
-                <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-                <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-              </Button>
-            ) : (
-              <Button variant="ghost" size="icon" disabled aria-label="Loading theme">
-                <Loader2 className="h-5 w-5 animate-spin" />
-              </Button>
-            )}
+            <span className="hidden [@media(pointer:fine)]:contents">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Keyboard shortcuts"
+                    onClick={() => setShortcutsDialogOpen(true)}
+                  >
+                    <Keyboard className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Keyboard shortcuts</TooltipContent>
+              </Tooltip>
+            </span>
+            <Dialog open={shortcutsDialogOpen} onOpenChange={setShortcutsDialogOpen}>
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Keyboard Shortcuts</DialogTitle>
+                  <DialogDescription>
+                    Shortcuts are disabled while typing or when a dialog is open.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span>Toggle recording</span>
+                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">R</kbd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Toggle listening</span>
+                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">L</kbd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Send test tone</span>
+                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">T</kbd>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {mounted ? (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+                    onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                  >
+                    <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+                    <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+                  </Button>
+                ) : (
+                  <Button variant="ghost" size="icon" disabled aria-label="Loading theme">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  </Button>
+                )}
+              </TooltipTrigger>
+              <TooltipContent>{theme === "dark" ? "Light" : "Dark"} mode</TooltipContent>
+            </Tooltip>
             {authEnabled && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -811,7 +909,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
             </CardHeader>
             <CardContent className="space-y-3">
               {status.recording ? (
-                <AlertDialog>
+                <AlertDialog open={stopRecordDialogOpen} onOpenChange={setStopRecordDialogOpen}>
                   <AlertDialogTrigger asChild>
                     <Button
                       disabled={!statusLoaded || recordLoading || toneLoading}
@@ -824,6 +922,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                         <Square className="mr-2 h-4 w-4" />
                       )}
                       Stop Recording
+                      <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">R</kbd>
                     </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
@@ -848,7 +947,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                 <Button
                   onClick={toggleRecord}
                   disabled={!statusLoaded || recordLoading || toneLoading}
-                  className="w-full"
+                  className="w-full gap-1"
                 >
                   {recordLoading ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -856,6 +955,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                     <Circle className="mr-2 h-4 w-4 fill-red-500 text-red-500" />
                   )}
                   Start Recording
+                  <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">R</kbd>
                 </Button>
               )}
               {status.recording && (
@@ -1008,7 +1108,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                 onClick={listenLoading ? cancelListening : liveConnected ? stopListening : startListening}
                 disabled={toneLoading}
                 variant={liveConnected ? "destructive" : "outline"}
-                className="w-full"
+                className="w-full gap-1"
               >
                 {listenLoading ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1016,6 +1116,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                   <Volume2 className="mr-2 h-4 w-4" />
                 )}
                 {listenLoading ? "Cancel" : liveConnected ? "Stop Listening" : "Listen"}
+                <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">L</kbd>
               </Button>
 
               <Tooltip open={status.recording ? undefined : false}>
@@ -1026,7 +1127,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                       size="sm"
                       onClick={toneLoading ? cancelTestTone : sendTestTone}
                       disabled={status.recording || listenLoading}
-                      className="w-full"
+                      className="w-full gap-1 px-3 has-[>svg]:px-3"
                     >
                       {toneLoading ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1034,6 +1135,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                         <AudioWaveform className="mr-2 h-4 w-4" />
                       )}
                       {toneLoading ? "Cancel" : "Test Tone"}
+                      <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">T</kbd>
                     </Button>
                   </span>
                 </TooltipTrigger>
