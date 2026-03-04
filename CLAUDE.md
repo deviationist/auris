@@ -46,6 +46,7 @@ Toggling recording starts/stops only `auris-record` — the Icecast stream is ne
 | `src/components/live-waveform.tsx` | Real-time waveform visualization |
 | `src/components/waveform-player.tsx` | Canvas waveform player with seek, play/pause, level meter |
 | `src/components/card-mixer.tsx` | ALSA mixer card component |
+| `src/hooks/use-local-storage.ts` | Generic localStorage hook (SSR-safe, deferred read) |
 | `src/lib/systemctl.ts` | Start/stop/restart systemd units via sudo |
 | `src/lib/alsa.ts` | ALSA device enumeration & mixer control |
 | `src/lib/device-config.ts` | Persist selected ALSA device to `/etc/default/auris` |

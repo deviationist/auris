@@ -247,6 +247,8 @@ auris/
 │   │   ├── waveform-player.tsx         # Canvas waveform player with seek, play/pause
 │   │   ├── card-mixer.tsx              # ALSA mixer card component
 │   │   └── theme-provider.tsx          # next-themes wrapper
+│   ├── hooks/
+│   │   └── use-local-storage.ts       # Generic localStorage hook (SSR-safe)
 │   └── lib/
 │       ├── utils.ts                    # cn() helper
 │       ├── systemctl.ts                # systemctl wrapper

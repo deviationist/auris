@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
+import { useLocalStorage } from "@/hooks/use-local-storage";
 import {
   AudioLines,
   Circle,
@@ -151,8 +152,8 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const [cardMixers, setCardMixers] = useState<CardMixerState[] | null>(null);
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null);
   const [mixerLoading, setMixerLoading] = useState(false);
-  const [mixerOpen, setMixerOpen] = useState(false);
-  const [recordingsOpen, setRecordingsOpen] = useState(true);
+  const [mixerOpen, setMixerOpen] = useLocalStorage("auris:mixerOpen", false);
+  const [recordingsOpen, setRecordingsOpen] = useLocalStorage("auris:recordingsOpen", true);
   const [deviceLoading, setDeviceLoading] = useState(false);
   const [liveConnected, setLiveConnected] = useState(false);
   const [listenLoading, setListenLoading] = useState(false);
@@ -796,12 +797,16 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               </div>
               <CardDescription className="flex items-center justify-between gap-2">
                 <span>Record audio source to disk</span>
-                {deviceState?.devices.find((d) => d.alsaId === deviceState.selectedRecord)?.cardName && (
+                {deviceState === null ? (
+                  <span className="flex items-center gap-1 text-xs text-foreground/60">
+                    <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden="true" />
+                  </span>
+                ) : deviceState.devices.find((d) => d.alsaId === deviceState.selectedRecord)?.cardName ? (
                   <span className="flex items-center gap-1 truncate text-xs font-medium text-foreground/60">
                     <Mic className="h-3 w-3 shrink-0" aria-hidden="true" />
                     {deviceState.devices.find((d) => d.alsaId === deviceState.selectedRecord)!.cardName}
                   </span>
-                )}
+                ) : null}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -986,12 +991,16 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               </div>
               <CardDescription className="flex items-center justify-between gap-2">
                 <span>Listen to live audio input</span>
-                {deviceState?.devices.find((d) => d.alsaId === deviceState.selectedListen)?.cardName && (
+                {deviceState === null ? (
+                  <span className="flex items-center gap-1 text-xs text-foreground/60">
+                    <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden="true" />
+                  </span>
+                ) : deviceState.devices.find((d) => d.alsaId === deviceState.selectedListen)?.cardName ? (
                   <span className="flex items-center gap-1 truncate text-xs font-medium text-foreground/60">
                     <Mic className="h-3 w-3 shrink-0" aria-hidden="true" />
                     {deviceState.devices.find((d) => d.alsaId === deviceState.selectedListen)!.cardName}
                   </span>
-                )}
+                ) : null}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -1058,7 +1067,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
             type="button"
             className="flex w-full items-center justify-between px-6 text-left cursor-pointer"
             onClick={() => setMixerOpen((o) => !o)}
-            aria-expanded={mixerOpen}
+            aria-expanded={mounted && mixerOpen}
             aria-controls="mixer-panel"
           >
             <div>
@@ -1066,10 +1075,10 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               <CardDescription>ALSA mixer levels per card</CardDescription>
             </div>
             <ChevronDown
-              className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${mixerOpen ? "rotate-180" : ""}`}
+              className={`h-5 w-5 text-muted-foreground ${mounted ? "transition-transform duration-200 opacity-100" : "opacity-0"} ${mounted && mixerOpen ? "rotate-180" : ""}`}
             />
           </button>
-          {mixerOpen && (
+          {mounted && mixerOpen && (
             <CardContent id="mixer-panel" className="pt-0">
               {cardMixers === null ? (
                 <div className="flex items-center gap-2 h-9 px-3 text-sm text-muted-foreground" role="status" aria-live="polite">
@@ -1116,7 +1125,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
             type="button"
             className="flex w-full items-center justify-between px-6 text-left cursor-pointer"
             onClick={() => setRecordingsOpen((o) => !o)}
-            aria-expanded={recordingsOpen}
+            aria-expanded={mounted && recordingsOpen}
             aria-controls="recordings-panel"
           >
             <div>
@@ -1128,10 +1137,10 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               </CardDescription>
             </div>
             <ChevronDown
-              className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${recordingsOpen ? "rotate-180" : ""}`}
+              className={`h-5 w-5 text-muted-foreground ${mounted ? "transition-transform duration-200 opacity-100" : "opacity-0"} ${mounted && recordingsOpen ? "rotate-180" : ""}`}
             />
           </button>
-          {recordingsOpen && (
+          {mounted && recordingsOpen && (
           <CardContent id="recordings-panel">
             {recordings === null ? (
               <div className="flex justify-center py-4" role="status" aria-live="polite">
