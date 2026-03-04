@@ -36,7 +36,8 @@ Toggling recording starts/stops only `auris-record` — the Icecast stream is ne
 
 | Path | Purpose |
 |------|---------|
-| `src/app/page.tsx` | Main dashboard UI (all state, controls, recordings) |
+| `src/app/page.tsx` | Server component wrapper (resolves auth state) |
+| `src/app/dashboard.tsx` | Main dashboard UI (all state, controls, recordings) |
 | `src/app/login/page.tsx` | Login page (redirects to `/` when auth disabled) |
 | `src/auth.ts` | Auth.js v5 config (Credentials provider, JWT sessions) |
 | `src/proxy.ts` | Route protection (skips auth when disabled) |

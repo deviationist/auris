@@ -210,8 +210,9 @@ auris/
 │   ├── auth.ts                         # Auth.js v5 config (Credentials, JWT)
 │   ├── proxy.ts                        # Route protection proxy (auth gate)
 │   ├── app/
-│   │   ├── page.tsx                    # Main dashboard UI
-│   │   ├── layout.tsx                  # Root layout (SessionProvider, ThemeProvider)
+│   │   ├── page.tsx                    # Server component (resolves auth state)
+│   │   ├── dashboard.tsx               # Main dashboard UI (client component)
+│   │   ├── layout.tsx                  # Root layout (ThemeProvider)
 │   │   ├── login/page.tsx              # Login page
 │   │   ├── stream/[...path]/route.ts  # Proxies /stream/* to Icecast
 │   │   ├── globals.css                 # Tailwind + shadcn/ui theme (light/dark)
