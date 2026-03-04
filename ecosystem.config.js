@@ -3,8 +3,9 @@ module.exports = {
     {
       name: "auris",
       cwd: "/opt/auris",
-      script: "npm",
-      args: "run start",
+      script: "server.ts",
+      interpreter: "node",
+      interpreter_args: "--import tsx",
       env: {
         NODE_ENV: "production",
         PORT: 3075,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isActive } from "@/lib/systemctl";
-import { getRecordDevice, getRecordStartedAt, getRecordChunkMinutes } from "@/lib/device-config";
+import { getRecordDevice, getRecordStartedAt, getRecordChunkMinutes, getClientRecordMaxMinutes } from "@/lib/device-config";
 import { listCaptureDevices } from "@/lib/alsa";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
@@ -93,13 +93,14 @@ export async function GET() {
     }
 
     const record_chunk_minutes = await getRecordChunkMinutes();
+    const client_record_max_minutes = await getClientRecordMaxMinutes();
 
     // Recover chunk timer after server restart (e.g. PM2 reload)
     if (recording && record_chunk_minutes > 0 && recording_started && !hasChunkTimer()) {
       scheduleChunk(record_chunk_minutes, recording_started);
     }
 
-    return NextResponse.json({ streaming, recording, recording_file, recording_started, record_chunk_minutes });
+    return NextResponse.json({ streaming, recording, recording_file, recording_started, record_chunk_minutes, client_record_max_minutes });
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to get status", detail: String(error) },

@@ -1,6 +1,6 @@
 # Auris
 
-Web-based audio monitoring and recording app. Streams live audio via Icecast2 and records to disk. Next.js UI for control and monitoring.
+Remote audio console for monitoring, recording, and two-way communication. Streams live audio via Icecast2, records to disk (server and client), and provides push-to-talk intercom. Controlled through a Next.js web UI.
 
 ## Architecture
 

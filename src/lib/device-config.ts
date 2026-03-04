@@ -71,6 +71,17 @@ export async function setRecordBitrate(bitrate: string): Promise<void> {
   await writeConfig(config);
 }
 
+export async function getPlaybackDevice(): Promise<string> {
+  const config = await readConfig();
+  return config.ALSA_DEVICE_PLAYBACK || "plughw:0,0";
+}
+
+export async function setPlaybackDevice(alsaId: string): Promise<void> {
+  const config = await readConfig();
+  config.ALSA_DEVICE_PLAYBACK = alsaId;
+  await writeConfig(config);
+}
+
 // Aliases for backward compatibility
 export const getSelectedDevice = getListenDevice;
 export const setSelectedDevice = setListenDevice;
@@ -144,4 +155,10 @@ export async function setRecordChunkMinutes(minutes: number): Promise<void> {
     delete config.RECORD_CHUNK_MINUTES;
   }
   await writeConfig(config);
+}
+
+export async function getClientRecordMaxMinutes(): Promise<number> {
+  const config = await readConfig();
+  const val = parseInt(config.CLIENT_RECORD_MAX_MINUTES, 10);
+  return isNaN(val) || val <= 0 ? 30 : val;
 }

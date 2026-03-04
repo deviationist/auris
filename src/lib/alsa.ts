@@ -49,6 +49,36 @@ export async function listCaptureDevices(): Promise<CaptureDevice[]> {
   }
 }
 
+export interface PlaybackDevice {
+  card: number;
+  device: number;
+  name: string;
+  cardName: string;
+  alsaId: string;
+}
+
+export async function listPlaybackDevices(): Promise<PlaybackDevice[]> {
+  try {
+    const { stdout } = await exec("sudo aplay -l");
+    const regex =
+      /^card (\d+): \S+ \[(.+?)\], device (\d+): (.+?) \[/gm;
+    const devices: PlaybackDevice[] = [];
+    let match;
+    while ((match = regex.exec(stdout)) !== null) {
+      devices.push({
+        card: parseInt(match[1]),
+        device: parseInt(match[3]),
+        name: match[4],
+        cardName: match[2],
+        alsaId: `plughw:${match[1]},${match[3]}`,
+      });
+    }
+    return devices;
+  } catch {
+    return [];
+  }
+}
+
 export async function getCaptureVolume(
   card: number = 0
 ): Promise<MixerVolume | null> {

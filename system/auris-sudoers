@@ -9,4 +9,5 @@ trym ALL=(ALL) NOPASSWD: /usr/bin/systemctl start auris-stream, \
                              /usr/bin/systemctl daemon-reload, \
                              /usr/bin/amixer -c *, \
                              /usr/bin/arecord -l, \
+                             /usr/bin/aplay -l, \
                              /usr/bin/tee /etc/default/auris

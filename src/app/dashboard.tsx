@@ -21,6 +21,7 @@ import {
   LogOut,
   Mic,
   Keyboard,
+  Radio,
   Search,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
@@ -84,6 +85,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Label } from "@/components/ui/label";
 
 interface Status {
   streaming: boolean;
@@ -91,6 +93,7 @@ interface Status {
   recording_file: string | null;
   recording_started: number | null;
   record_chunk_minutes: number;
+  client_record_max_minutes: number;
 }
 
 interface Recording {
@@ -108,6 +111,19 @@ interface CaptureDevice {
   name: string;
   cardName: string;
   alsaId: string;
+}
+
+interface PlaybackDevice {
+  card: number;
+  device: number;
+  name: string;
+  cardName: string;
+  alsaId: string;
+}
+
+interface PlaybackState {
+  devices: PlaybackDevice[];
+  selected: string;
 }
 
 interface DeviceState {
@@ -164,6 +180,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     recording_file: null,
     recording_started: null,
     record_chunk_minutes: 0,
+    client_record_max_minutes: 30,
   });
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
@@ -196,6 +213,28 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const toneCleanupRef = useRef<(() => void) | null>(null);
   const toneTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingStopRef = useRef<Promise<void> | null>(null);
+
+  // Talkback state
+  const [talkbackActive, setTalkbackActive] = useState(false);
+  const [talkbackLevel, setTalkbackLevel] = useState(0);
+  const [talkbackRejected, setTalkbackRejected] = useState(false);
+  const [playbackState, setPlaybackState] = useState<PlaybackState | null>(null);
+  const talkbackWsRef = useRef<WebSocket | null>(null);
+  const talkbackStreamRef = useRef<MediaStream | null>(null);
+  const talkbackContextRef = useRef<AudioContext | null>(null);
+  const talkbackWorkletRef = useRef<AudioWorkletNode | null>(null);
+  const talkbackAnalyserRef = useRef<AnalyserNode | null>(null);
+  const talkbackRafRef = useRef<number>(0);
+
+  // Client recording state
+  const [clientRecording, setClientRecording] = useState(false);
+  const [clientRecordElapsed, setClientRecordElapsed] = useState(0);
+  const [clientRecordUploading, setClientRecordUploading] = useState(false);
+  const clientRecorderRef = useRef<MediaRecorder | null>(null);
+  const clientStreamRef = useRef<MediaStream | null>(null);
+  const clientChunksRef = useRef<Blob[]>([]);
+  const clientRecordStartRef = useRef<number>(0);
+  const clientRecordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -236,6 +275,15 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     }
   }, []);
 
+  const fetchPlaybackDevices = useCallback(async () => {
+    try {
+      const res = await fetch("/api/audio/playback");
+      if (res.ok) setPlaybackState(await res.json());
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
@@ -243,6 +291,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     fetchRecordings();
     fetchAllMixers();
     fetchDevices();
+    fetchPlaybackDevices();
     const statusInterval = setInterval(fetchStatus, 3000);
     const recordingsInterval = setInterval(fetchRecordings, 10000);
     const mixerInterval = setInterval(fetchAllMixers, 5000);
@@ -251,7 +300,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
       clearInterval(recordingsInterval);
       clearInterval(mixerInterval);
     };
-  }, [fetchStatus, fetchRecordings, fetchAllMixers, fetchDevices]);
+  }, [fetchStatus, fetchRecordings, fetchAllMixers, fetchDevices, fetchPlaybackDevices]);
 
   // Recording elapsed timer — use recording_started from the status API (DB createdAt)
   // so the timer survives page refreshes. Falls back to Date.now() if not yet available.
@@ -343,11 +392,34 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
         } else {
           sendTestTone();
         }
+      } else if (key === "k") {
+        e.preventDefault();
+        if (!talkbackActive) {
+          startTalkback();
+        }
+      } else if (key === "c") {
+        e.preventDefault();
+        if (!clientRecordUploading) {
+          if (clientRecording) {
+            stopClientRecording();
+          } else {
+            startClientRecording();
+          }
+        }
+      }
+    }
+    function handleKeyUp(e: KeyboardEvent) {
+      if (e.key.toLowerCase() === "k" && talkbackActive) {
+        stopTalkback();
       }
     }
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [status.recording, recordLoading, listenLoading, liveConnected, toneLoading]);
+    document.addEventListener("keyup", handleKeyUp);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [status.recording, recordLoading, listenLoading, liveConnected, toneLoading, talkbackActive, clientRecording, clientRecordUploading]);
 
   function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
@@ -618,6 +690,198 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
       .finally(() => { pendingStopRef.current = null; });
   }
 
+  async function startTalkback() {
+    setTalkbackRejected(false);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 48000 },
+      });
+      talkbackStreamRef.current = stream;
+
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/talkback`);
+      ws.binaryType = "arraybuffer";
+      talkbackWsRef.current = ws;
+
+      ws.onclose = (e) => {
+        if (e.code === 4409) {
+          setTalkbackRejected(true);
+          toast.error("Talkback already in use by another client");
+        }
+        stopTalkback();
+      };
+      ws.onerror = () => stopTalkback();
+
+      ws.onopen = async () => {
+        const ctx = new AudioContext({ sampleRate: 48000 });
+        talkbackContextRef.current = ctx;
+        const source = ctx.createMediaStreamSource(stream);
+
+        // Analyser for level meter
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        talkbackAnalyserRef.current = analyser;
+
+        // Start level metering
+        const dataArray = new Float32Array(analyser.fftSize);
+        function updateLevel() {
+          analyser.getFloatTimeDomainData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i] * dataArray[i];
+          const rms = Math.sqrt(sum / dataArray.length);
+          setTalkbackLevel(Math.min(1, rms * 5));
+          talkbackRafRef.current = requestAnimationFrame(updateLevel);
+        }
+        updateLevel();
+
+        // AudioWorklet for PCM capture
+        await ctx.audioWorklet.addModule("/talkback-processor.js");
+        const worklet = new AudioWorkletNode(ctx, "talkback-processor");
+        worklet.port.onmessage = (e: MessageEvent) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(e.data as ArrayBuffer);
+          }
+        };
+        source.connect(worklet);
+        talkbackWorkletRef.current = worklet;
+
+        setTalkbackActive(true);
+      };
+    } catch (err) {
+      const msg = err instanceof DOMException
+        ? err.name === "NotAllowedError"
+          ? "Microphone permission denied"
+          : err.name === "NotFoundError"
+            ? "No microphone found"
+            : err.message
+        : err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Talkback failed: ${msg}`);
+      stopTalkback();
+    }
+  }
+
+  function stopTalkback() {
+    cancelAnimationFrame(talkbackRafRef.current);
+    talkbackRafRef.current = 0;
+
+    talkbackWorkletRef.current?.disconnect();
+    talkbackWorkletRef.current = null;
+
+    talkbackAnalyserRef.current = null;
+
+    if (talkbackContextRef.current?.state !== "closed") {
+      talkbackContextRef.current?.close();
+    }
+    talkbackContextRef.current = null;
+
+    talkbackStreamRef.current?.getTracks().forEach((t) => t.stop());
+    talkbackStreamRef.current = null;
+
+    if (talkbackWsRef.current?.readyState === WebSocket.OPEN) {
+      talkbackWsRef.current.close();
+    }
+    talkbackWsRef.current = null;
+
+    setTalkbackActive(false);
+    setTalkbackLevel(0);
+  }
+
+  async function startClientRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      clientStreamRef.current = stream;
+      clientChunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      clientRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) clientChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        clientStreamRef.current?.getTracks().forEach((t) => t.stop());
+        clientStreamRef.current = null;
+
+        const blob = new Blob(clientChunksRef.current, { type: mimeType });
+        clientChunksRef.current = [];
+
+        if (blob.size === 0) return;
+
+        setClientRecordUploading(true);
+        try {
+          const form = new FormData();
+          form.append("audio", blob, "recording.webm");
+          const res = await fetch("/api/recordings/upload", { method: "POST", body: form });
+          if (res.ok) {
+            toast.success("Client recording uploaded");
+            await fetchRecordings();
+          } else {
+            const data = await res.json().catch(() => ({}));
+            toast.error(data.error || "Upload failed");
+          }
+        } catch {
+          toast.error("Upload failed");
+        } finally {
+          setClientRecordUploading(false);
+        }
+      };
+
+      recorder.start(1000); // collect data every second
+      clientRecordStartRef.current = Date.now();
+      setClientRecordElapsed(0);
+      setClientRecording(true);
+
+      // Elapsed timer
+      clientRecordTimerRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - clientRecordStartRef.current) / 1000);
+        setClientRecordElapsed(elapsed);
+
+        // Auto-stop at max duration
+        const maxSeconds = status.client_record_max_minutes * 60;
+        if (maxSeconds > 0 && elapsed >= maxSeconds) {
+          stopClientRecording();
+        }
+      }, 1000);
+    } catch (err) {
+      const msg = err instanceof DOMException && err.name === "NotAllowedError"
+        ? "Microphone access denied"
+        : "Failed to start recording";
+      toast.error(msg);
+    }
+  }
+
+  function stopClientRecording() {
+    if (clientRecordTimerRef.current) {
+      clearInterval(clientRecordTimerRef.current);
+      clientRecordTimerRef.current = null;
+    }
+    if (clientRecorderRef.current?.state === "recording") {
+      clientRecorderRef.current.stop();
+    }
+    clientRecorderRef.current = null;
+    setClientRecording(false);
+    setClientRecordElapsed(0);
+  }
+
+  async function selectPlaybackDevice(alsaId: string) {
+    if (alsaId === playbackState?.selected) return;
+    try {
+      await fetch("/api/audio/playback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ alsaId }),
+      });
+      await fetchPlaybackDevices();
+    } catch {
+      // ignore
+    }
+  }
+
   async function deleteRecording(filename: string) {
     try {
       const res = await fetch(
@@ -802,7 +1066,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
           <AudioLines className="h-8 w-8 text-primary" />
           <h1 className="text-3xl font-bold tracking-tight">Auris</h1>
           <span className="text-sm pt-1 text-muted-foreground">
-            Audio Monitor
+            Remote Audio Console
           </span>
           <div className="ml-auto flex items-center gap-1">
             <span className="hidden [@media(pointer:fine)]:contents">
@@ -840,6 +1104,14 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                   <div className="flex items-center justify-between">
                     <span>Send test tone</span>
                     <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">T</kbd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Push-to-talk (hold)</span>
+                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">K</kbd>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Client record</span>
+                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">C</kbd>
                   </div>
                 </div>
               </DialogContent>
@@ -960,7 +1232,8 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                               ))}
                             </SelectContent>
                           </Select>
-                          <p className="text-sm font-medium pt-2">Max Duration</p>
+                          <p className="text-sm font-medium pt-2">Auto-split</p>
+                          <p className="text-xs text-muted-foreground">Split into consecutive files at this interval</p>
                           <Select
                             value={String(status.record_chunk_minutes)}
                             onValueChange={setChunkMinutes}
@@ -1257,6 +1530,130 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
             </CardContent>
           </Card>
         </div>
+
+        {/* Talkback Card */}
+        <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg" role="heading" aria-level={2}>Talkback</CardTitle>
+                <div className="flex items-center gap-1.5">
+                  {talkbackActive && (
+                    <Badge
+                      variant="default"
+                      role="status"
+                      aria-live="polite"
+                      className="bg-orange-600 hover:bg-orange-600 text-white animate-pulse"
+                    >
+                      <Radio className="mr-1 h-3 w-3" aria-hidden="true" /> On Air
+                    </Badge>
+                  )}
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Talkback settings">
+                        <Cog className="h-3.5 w-3.5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64" align="end">
+                      {playbackState && playbackState.devices.length > 0 ? (
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium">Playback Device</p>
+                          <Select
+                            value={playbackState.selected}
+                            onValueChange={selectPlaybackDevice}
+                            disabled={talkbackActive}
+                          >
+                            <SelectTrigger className="text-xs h-8" aria-label="Playback device">
+                              <SelectValue placeholder="Select device...">
+                                {playbackState.devices.find((d) => d.alsaId === playbackState.selected)?.cardName ?? playbackState.selected}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {playbackState.devices.map((d) => (
+                                <SelectItem key={d.alsaId} value={d.alsaId} textValue={d.cardName}>
+                                  <span>{d.cardName}</span>
+                                  <span className="text-muted-foreground text-xs">{d.alsaId}</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <span>Loading devices...</span>
+                        </div>
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+              <CardDescription className="flex items-center justify-between gap-2">
+                <span>Speak through the server speaker</span>
+                {playbackState === null ? (
+                  <span className="flex items-center gap-1 text-xs text-foreground/60">
+                    <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden="true" />
+                  </span>
+                ) : playbackState.devices.find((d) => d.alsaId === playbackState.selected)?.cardName ? (
+                  <span className="flex items-center gap-1 truncate text-xs font-medium text-foreground/60">
+                    <Volume2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    {playbackState.devices.find((d) => d.alsaId === playbackState.selected)!.cardName}
+                  </span>
+                ) : null}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button
+                onMouseDown={() => !talkbackActive && startTalkback()}
+                onMouseUp={() => talkbackActive && stopTalkback()}
+                onMouseLeave={() => talkbackActive && stopTalkback()}
+                onTouchStart={(e) => { e.preventDefault(); if (!talkbackActive) startTalkback(); }}
+                onTouchEnd={() => talkbackActive && stopTalkback()}
+                variant={talkbackActive ? "destructive" : "outline"}
+                className="w-full gap-1 select-none"
+              >
+                <Radio className="mr-2 h-4 w-4" />
+                {talkbackActive ? "Release to Stop" : "Hold to Talk"}
+                <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">K</kbd>
+              </Button>
+              {talkbackActive && (
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-orange-500 transition-all duration-75"
+                    style={{ width: `${talkbackLevel * 100}%` }}
+                  />
+                </div>
+              )}
+              {talkbackRejected && (
+                <p className="text-xs text-destructive">Talkback is in use by another client.</p>
+              )}
+              <div>
+                <Button
+                  id="client-record-btn"
+                  onClick={() => clientRecording ? stopClientRecording() : startClientRecording()}
+                  disabled={clientRecordUploading}
+                  variant={clientRecording ? "destructive" : "outline"}
+                  className="w-full gap-1"
+                >
+                  {clientRecordUploading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : clientRecording ? (
+                    <Square className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Circle className="mr-2 h-4 w-4 fill-current" />
+                  )}
+                  {clientRecordUploading
+                    ? "Uploading..."
+                    : clientRecording
+                      ? `Stop (${formatDuration(clientRecordElapsed)})`
+                      : "Record"}
+                  <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">C</kbd>
+                </Button>
+                <Label htmlFor="client-record-btn" className="text-xs text-muted-foreground mt-2">
+                  Record from browser mic
+                </Label>
+              </div>
+            </CardContent>
+          </Card>
 
         {/* Mixer Card (collapsible) */}
         <Card>
