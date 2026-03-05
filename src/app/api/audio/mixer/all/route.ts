@@ -4,6 +4,7 @@ import {
   getCaptureVolume,
   getMicBoost,
   getInputSource,
+  getPlaybackVolume,
 } from "@/lib/alsa";
 
 export const dynamic = "force-dynamic";
@@ -17,10 +18,11 @@ export async function GET() {
     const mixers = await Promise.all(
       cards.map(async (card) => {
         const cardDevice = devices.find((d) => d.card === card);
-        const [capture, micBoost, inputSource] = await Promise.all([
+        const [capture, micBoost, inputSource, playbackVolume] = await Promise.all([
           getCaptureVolume(card),
           getMicBoost(card),
           getInputSource(card),
+          getPlaybackVolume(card),
         ]);
         return {
           card,
@@ -28,6 +30,7 @@ export async function GET() {
           capture,
           micBoost,
           inputSource,
+          playbackVolume,
         };
       })
     );

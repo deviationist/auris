@@ -31,6 +31,7 @@ Toggling recording starts/stops only `auris-record` — the Icecast stream is ne
 - **Audio:** ffmpeg (ALSA capture, libmp3lame encoding), Icecast2 (streaming)
 - **System:** systemd services, ALSA mixer (amixer), PM2 (production), Nginx (reverse proxy)
 - **Browser audio:** HTML5 Audio element + WebAudio API (AnalyserNode for level metering)
+- **URL state:** nuqs (query string persistence for filters)
 
 ## Key Files
 
@@ -45,12 +46,14 @@ Toggling recording starts/stops only `auris-record` — the Icecast stream is ne
 | `src/components/level-meter.tsx` | WebAudio RMS/dB level meter |
 | `src/components/live-waveform.tsx` | Real-time waveform visualization |
 | `src/components/waveform-player.tsx` | Canvas waveform player with seek, play/pause, level meter |
-| `src/components/card-mixer.tsx` | ALSA mixer card component |
+| `src/components/card-mixer.tsx` | ALSA mixer card component (capture, playback, boost, input source) |
 | `src/hooks/use-local-storage.ts` | Generic localStorage hook (SSR-safe, deferred read) |
 | `src/lib/systemctl.ts` | Start/stop/restart systemd units via sudo |
-| `src/lib/alsa.ts` | ALSA device enumeration & mixer control |
-| `src/lib/device-config.ts` | Persist selected ALSA device to `/etc/default/auris` |
+| `src/lib/alsa.ts` | ALSA device enumeration & mixer control (capture + playback volume) |
+| `src/lib/device-config.ts` | Persist selected ALSA devices to `/etc/default/auris` (record, listen, playback) |
 | `src/lib/auth-config.ts` | Read auth credentials from `/etc/default/auris` |
+| `src/lib/server-playback.ts` | Server-side playback: ffmpeg MP3 → ALSA output (globalThis singleton) |
+| `src/lib/talkback.ts` | Browser-to-server talkback: receives PCM audio, plays via ALSA |
 | `src/lib/waveform.ts` | Shared waveform generation (ffmpeg PCM → peaks JSON) |
 | `src/lib/db/schema.ts` | Drizzle ORM schema (recordings table) |
 | `src/lib/db/index.ts` | DB singleton, auto-migration, disk→DB sync |
@@ -90,7 +93,9 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - UI components from `src/components/ui/` (shadcn/ui — do not edit directly)
 - Audio encoding: MP3 128kbps, 44.1kHz, mono everywhere
 - Icecast mount: `/mic` (source password: `sourcepass`)
-- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`
+- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`
+- Server playback uses `globalThis` singleton to survive HMR in dev mode
+- Server playback and talkback are mutually exclusive (talkback takes priority)
 - Auth is optional: omit `AUTH_USERNAME`/`AUTH_PASSWORD_HASH` to disable. `src/proxy.ts` checks `isAuthEnabled()` and skips auth when unconfigured.
 - `.env.local` — `AUTH_SECRET` (required when auth enabled), `AUTH_TRUST_HOST=true`
 - Sudoers at `system/auris-sudoers` — update when adding new privileged commands

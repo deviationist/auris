@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import { readdir, stat } from "fs/promises";
 import { join } from "path";
 import { scheduleChunk, hasChunkTimer } from "@/lib/record-chunker";
+import { getActivePlayback } from "@/lib/server-playback";
 
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
 
@@ -100,7 +101,9 @@ export async function GET() {
       scheduleChunk(record_chunk_minutes, recording_started);
     }
 
-    return NextResponse.json({ streaming, recording, recording_file, recording_started, record_chunk_minutes, client_record_max_minutes });
+    const server_playback = getActivePlayback();
+
+    return NextResponse.json({ streaming, recording, recording_file, recording_started, record_chunk_minutes, client_record_max_minutes, server_playback });
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to get status", detail: String(error) },

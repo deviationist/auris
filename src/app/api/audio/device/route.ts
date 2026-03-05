@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
     if (!alsaId || typeof alsaId !== "string") {
       return NextResponse.json({ error: "Missing alsaId" }, { status: 400 });
     }
-    if (!/^plughw:\d+,\d+$/.test(alsaId)) {
+    if (!/^plughw:CARD=\w+,DEV=\d+$/.test(alsaId)) {
       return NextResponse.json(
         { error: "Invalid device format" },
         { status: 400 }

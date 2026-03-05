@@ -16,7 +16,7 @@ echo ""
 # --- Install system packages ---
 echo "==> Installing system packages (ffmpeg, icecast2)..."
 sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg icecast2 > /dev/null
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg icecast2 autotalent > /dev/null
 
 # --- Symlink to /opt/auris ---
 if [ ! -e /opt/auris ]; then

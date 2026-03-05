@@ -31,16 +31,16 @@ export async function listCaptureDevices(): Promise<CaptureDevice[]> {
   try {
     const { stdout } = await exec("sudo arecord -l");
     const regex =
-      /^card (\d+): \S+ \[(.+?)\], device (\d+): (.+?) \[/gm;
+      /^card (\d+): (\S+) \[(.+?)\], device (\d+): (.+?) \[/gm;
     const devices: CaptureDevice[] = [];
     let match;
     while ((match = regex.exec(stdout)) !== null) {
       devices.push({
         card: parseInt(match[1]),
-        device: parseInt(match[3]),
-        name: match[4],
-        cardName: match[2],
-        alsaId: `plughw:${match[1]},${match[3]}`,
+        device: parseInt(match[4]),
+        name: match[5],
+        cardName: match[3],
+        alsaId: `plughw:CARD=${match[2]},DEV=${match[4]}`,
       });
     }
     return devices;
@@ -61,16 +61,16 @@ export async function listPlaybackDevices(): Promise<PlaybackDevice[]> {
   try {
     const { stdout } = await exec("sudo aplay -l");
     const regex =
-      /^card (\d+): \S+ \[(.+?)\], device (\d+): (.+?) \[/gm;
+      /^card (\d+): (\S+) \[(.+?)\], device (\d+): (.+?) \[/gm;
     const devices: PlaybackDevice[] = [];
     let match;
     while ((match = regex.exec(stdout)) !== null) {
       devices.push({
         card: parseInt(match[1]),
-        device: parseInt(match[3]),
-        name: match[4],
-        cardName: match[2],
-        alsaId: `plughw:${match[1]},${match[3]}`,
+        device: parseInt(match[4]),
+        name: match[5],
+        cardName: match[3],
+        alsaId: `plughw:CARD=${match[2]},DEV=${match[4]}`,
       });
     }
     return devices;
@@ -126,6 +126,39 @@ export async function getInputSource(
   }
 }
 
+export async function getPlaybackVolume(
+  card: number = 0
+): Promise<MixerVolume | null> {
+  // Try common playback control names
+  for (const name of ["PCM Playback Volume", "PCM", "Speaker", "Headphone"]) {
+    try {
+      const { stdout } = await exec(
+        `sudo amixer -c ${card} sget '${name}'`
+      );
+      const result = parseVolume(name, stdout);
+      if (result) return result;
+    } catch {
+      // control doesn't exist, try next
+    }
+  }
+  return null;
+}
+
+export async function setPlaybackVolume(
+  value: number,
+  card: number = 0
+): Promise<void> {
+  for (const name of ["PCM Playback Volume", "PCM", "Speaker", "Headphone"]) {
+    try {
+      await exec(`sudo amixer -c ${card} sset '${name}' ${value}`);
+      return;
+    } catch {
+      // control doesn't exist, try next
+    }
+  }
+  throw new Error("No playback volume control found");
+}
+
 export async function setCaptureVolume(
   value: number,
   card: number = 0
@@ -149,9 +182,9 @@ export async function setInputSource(
 
 function parseVolume(name: string, stdout: string): MixerVolume | null {
   const limMatch = stdout.match(/Limits:.*?(\d+) - (\d+)/);
-  // Match capture or playback volume lines
+  // Match capture or playback volume lines (Front Left or Mono channel)
   const valMatch = stdout.match(
-    /Front Left:.*?(\d+) \[(\d+)%\] \[(.+?dB)\](?:\s*\[(on|off)\])?/
+    /(?:Front Left|Mono):.*?(\d+) \[(\d+)%\] \[(.+?dB)\](?:\s*\[(on|off)\])?/
   );
   if (!limMatch || !valMatch) return null;
   return {

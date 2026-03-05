@@ -6,7 +6,7 @@ if [ -f /etc/default/auris ]; then
   source /etc/default/auris
 fi
 
-ALSA_DEVICE="${ALSA_DEVICE_RECORD:-${ALSA_DEVICE:-plughw:0,0}}"
+ALSA_DEVICE="${ALSA_DEVICE_RECORD:-${ALSA_DEVICE:-plughw:CARD=PCH,DEV=0}}"
 BITRATE="${RECORD_BITRATE:-128k}"
 RECORDINGS_DIR="${RECORDINGS_DIR:-/recordings}"
 PART_SUFFIX=""

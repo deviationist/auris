@@ -28,7 +28,7 @@ async function writeConfig(config: Record<string, string>): Promise<void> {
 
 export async function getListenDevice(): Promise<string> {
   const config = await readConfig();
-  return config.ALSA_DEVICE_LISTEN || config.ALSA_DEVICE || "plughw:0,0";
+  return config.ALSA_DEVICE_LISTEN || config.ALSA_DEVICE || "plughw:CARD=PCH,DEV=0";
 }
 
 export async function setListenDevice(alsaId: string): Promise<void> {
@@ -40,7 +40,7 @@ export async function setListenDevice(alsaId: string): Promise<void> {
 
 export async function getRecordDevice(): Promise<string> {
   const config = await readConfig();
-  return config.ALSA_DEVICE_RECORD || config.ALSA_DEVICE || "plughw:0,0";
+  return config.ALSA_DEVICE_RECORD || config.ALSA_DEVICE || "plughw:CARD=PCH,DEV=0";
 }
 
 export async function setRecordDevice(alsaId: string): Promise<void> {
@@ -73,7 +73,7 @@ export async function setRecordBitrate(bitrate: string): Promise<void> {
 
 export async function getPlaybackDevice(): Promise<string> {
   const config = await readConfig();
-  return config.ALSA_DEVICE_PLAYBACK || "plughw:0,0";
+  return config.ALSA_DEVICE_PLAYBACK || "plughw:CARD=PCH,DEV=0";
 }
 
 export async function setPlaybackDevice(alsaId: string): Promise<void> {

@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
+import { useQueryState, parseAsStringLiteral } from "nuqs";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import {
   AudioLines,
@@ -23,6 +24,7 @@ import {
   Keyboard,
   Radio,
   Search,
+  Speaker,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { toast } from "sonner";
@@ -86,6 +88,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
+import { DEFAULT_EFFECTS, AUTOTUNE_KEYS, type TalkbackEffects } from "@/lib/talkback-effects";
 
 interface Status {
   streaming: boolean;
@@ -94,6 +99,7 @@ interface Status {
   recording_started: number | null;
   record_chunk_minutes: number;
   client_record_max_minutes: number;
+  server_playback: { filename: string; startedAt: number } | null;
 }
 
 interface Recording {
@@ -181,11 +187,14 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     recording_started: null,
     record_chunk_minutes: 0,
     client_record_max_minutes: 30,
+    server_playback: null,
   });
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
   const [stopRecordDialogOpen, setStopRecordDialogOpen] = useState(false);
   const [playingFile, setPlayingFile] = useState<string | null>(null);
+  const [serverPlayingFile, setServerPlayingFile] = useState<string | null>(null);
+  const serverPlaybackPending = useRef(false);
   const [cardMixers, setCardMixers] = useState<CardMixerState[] | null>(null);
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null);
   const [mixerLoading, setMixerLoading] = useState(false);
@@ -198,8 +207,9 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const [toneLoading, setToneLoading] = useState(false);
   const [toneConnected, setToneConnected] = useState(false);
   const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false);
-  const [recordingsSearch, setRecordingsSearch] = useState("");
-  const [recordingsDateFilter, setRecordingsDateFilter] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [recordingsSearch, setRecordingsSearch] = useQueryState("q", { defaultValue: "", history: "replace", shallow: true, clearOnDefault: true });
+  const [recordingsDateFilter, setRecordingsDateFilter] = useQueryState("date", parseAsStringLiteral(["all", "today", "7d", "30d"] as const).withDefault("all").withOptions({ history: "replace", shallow: true, clearOnDefault: true }));
+  const [recordingsDeviceFilter, setRecordingsDeviceFilter] = useQueryState("device", { defaultValue: "all", history: "replace", shallow: true, clearOnDefault: true });
   const [recordingsPageSize, setRecordingsPageSize] = useState(20);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [recordElapsed, setRecordElapsed] = useState(0);
@@ -215,6 +225,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const pendingStopRef = useRef<Promise<void> | null>(null);
 
   // Talkback state
+  const [talkbackEffects, setTalkbackEffects] = useLocalStorage<TalkbackEffects>("talkback-effects", DEFAULT_EFFECTS);
   const [talkbackActive, setTalkbackActive] = useState(false);
   const [talkbackLevel, setTalkbackLevel] = useState(0);
   const [talkbackRejected, setTalkbackRejected] = useState(false);
@@ -240,8 +251,16 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     try {
       const res = await fetch("/api/status");
       if (res.ok) {
-        setStatus(await res.json());
+        const data = await res.json();
+        setStatus(data);
         setStatusLoaded(true);
+        // Sync optimistic server playback state with actual status
+        // Don't clear while a request is in flight (race with status poll)
+        if (!serverPlaybackPending.current) {
+          setServerPlayingFile((prev) =>
+            prev && !data.server_playback ? null : prev
+          );
+        }
       }
     } catch {
       // ignore transient errors
@@ -699,7 +718,9 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
       talkbackStreamRef.current = stream;
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/talkback`);
+      const params = new URLSearchParams();
+      params.set("effects", JSON.stringify(talkbackEffects));
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/talkback?${params}`);
       ws.binaryType = "arraybuffer";
       talkbackWsRef.current = ws;
 
@@ -910,9 +931,43 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     setPlayingFile(filename);
   }
 
+  async function startServerPlayback(filename: string) {
+    serverPlaybackPending.current = true;
+    setServerPlayingFile(filename);
+    try {
+      const res = await fetch("/api/audio/playback/server", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        toast.error(data.error || "Failed to start server playback");
+        setServerPlayingFile(null);
+        return;
+      }
+      await fetchStatus();
+    } catch {
+      toast.error("Failed to start server playback");
+      setServerPlayingFile(null);
+    } finally {
+      serverPlaybackPending.current = false;
+    }
+  }
+
+  async function stopServerPlayback() {
+    setServerPlayingFile(null);
+    try {
+      await fetch("/api/audio/playback/server", { method: "DELETE" });
+      await fetchStatus();
+    } catch {
+      toast.error("Failed to stop server playback");
+    }
+  }
+
   async function updateMixer(
     card: number,
-    updates: Partial<{ capture: number; micBoost: number; inputSource: string }>
+    updates: Partial<{ capture: number; micBoost: number; inputSource: string; playbackVolume: number }>
   ) {
     setMixerLoading(true);
     try {
@@ -1010,6 +1065,16 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     }
   }
 
+  const recordingDevices = useMemo(() => {
+    if (!recordings) return [];
+    const counts = new Map<string, number>();
+    for (const r of recordings) {
+      const d = r.device || "Unknown";
+      counts.set(d, (counts.get(d) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [recordings]);
+
   const filteredRecordings = useMemo(() => {
     if (!recordings) return null;
     let filtered = recordings;
@@ -1029,8 +1094,12 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
       filtered = filtered.filter(r => r.createdAt >= cutoff);
     }
 
+    if (recordingsDeviceFilter !== "all") {
+      filtered = filtered.filter(r => (r.device || "Unknown") === recordingsDeviceFilter);
+    }
+
     return filtered;
-  }, [recordings, recordingsSearch, recordingsDateFilter]);
+  }, [recordings, recordingsSearch, recordingsDateFilter, recordingsDeviceFilter]);
 
   const visibleRecordings = useMemo(
     () => filteredRecordings?.slice(0, recordingsPageSize) ?? null,
@@ -1040,7 +1109,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   // Reset page size when filters change
   useEffect(() => {
     setRecordingsPageSize(20);
-  }, [recordingsSearch, recordingsDateFilter]);
+  }, [recordingsSearch, recordingsDateFilter, recordingsDeviceFilter]);
 
   // IntersectionObserver for infinite scroll
   useEffect(() => {
@@ -1095,23 +1164,23 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                 <div className="grid gap-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span>Toggle recording</span>
-                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">R</kbd>
+                    <kbd className="border rounded text-xs font-mono bg-muted inline-flex items-center justify-center w-6 h-6 leading-none">R</kbd>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Toggle listening</span>
-                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">L</kbd>
+                    <kbd className="border rounded text-xs font-mono bg-muted inline-flex items-center justify-center w-6 h-6 leading-none">L</kbd>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Send test tone</span>
-                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">T</kbd>
+                    <kbd className="border rounded text-xs font-mono bg-muted inline-flex items-center justify-center w-6 h-6 leading-none">T</kbd>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Push-to-talk (hold)</span>
-                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">K</kbd>
+                    <kbd className="border rounded text-xs font-mono bg-muted inline-flex items-center justify-center w-6 h-6 leading-none">K</kbd>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Client record</span>
-                    <kbd className="border rounded px-2 py-0.5 text-xs font-mono bg-muted">C</kbd>
+                    <kbd className="border rounded text-xs font-mono bg-muted inline-flex items-center justify-center w-6 h-6 leading-none">C</kbd>
                   </div>
                 </div>
               </DialogContent>
@@ -1290,7 +1359,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                         <Square className="mr-2 h-4 w-4" />
                       )}
                       Stop Recording
-                      <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">R</kbd>
+                      <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">R</kbd>
                     </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
@@ -1323,7 +1392,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                     <Circle className="mr-2 h-4 w-4 fill-red-500 text-red-500" />
                   )}
                   Start Recording
-                  <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">R</kbd>
+                  <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">R</kbd>
                 </Button>
               )}
               {status.recording && (
@@ -1484,7 +1553,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                   <Volume2 className="mr-2 h-4 w-4" />
                 )}
                 {listenLoading ? "Cancel" : liveConnected ? "Stop Listening" : "Listen"}
-                <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">L</kbd>
+                <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">L</kbd>
               </Button>
 
               <Tooltip open={status.recording ? undefined : false}>
@@ -1503,7 +1572,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                         <AudioWaveform className="mr-2 h-4 w-4" />
                       )}
                       {toneLoading ? "Cancel" : "Test Tone"}
-                      <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">T</kbd>
+                      <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">T</kbd>
                     </Button>
                   </span>
                 </TooltipTrigger>
@@ -1553,7 +1622,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                         <Cog className="h-3.5 w-3.5" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-64" align="end">
+                    <PopoverContent className="w-72 max-h-[80vh] overflow-y-auto" align="end">
                       {playbackState && playbackState.devices.length > 0 ? (
                         <div className="space-y-2">
                           <p className="text-sm font-medium">Playback Device</p>
@@ -1583,6 +1652,239 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                           <span>Loading devices...</span>
                         </div>
                       )}
+
+                      <div className="border-t mt-3 pt-3 space-y-3">
+                        <p className="text-sm font-medium">Voice Effects</p>
+
+                        {/* Pitch Shift */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Pitch Shift</Label>
+                            <Switch
+                              checked={talkbackEffects.pitchShift.enabled}
+                              onCheckedChange={(v) => setTalkbackEffects({ ...talkbackEffects, pitchShift: { ...talkbackEffects.pitchShift, enabled: v } })}
+                            />
+                          </div>
+                          {talkbackEffects.pitchShift.enabled && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Semitones</span>
+                                <span>{talkbackEffects.pitchShift.semitones > 0 ? "+" : ""}{talkbackEffects.pitchShift.semitones}</span>
+                              </div>
+                              <Slider
+                                min={-12} max={12} step={1}
+                                value={[talkbackEffects.pitchShift.semitones]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, pitchShift: { ...talkbackEffects.pitchShift, semitones: v } })}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Echo */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Echo</Label>
+                            <Switch
+                              checked={talkbackEffects.echo.enabled}
+                              onCheckedChange={(v) => setTalkbackEffects({ ...talkbackEffects, echo: { ...talkbackEffects.echo, enabled: v } })}
+                            />
+                          </div>
+                          {talkbackEffects.echo.enabled && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Delay</span>
+                                <span>{Math.round(talkbackEffects.echo.delay)}ms</span>
+                              </div>
+                              <Slider
+                                min={50} max={500} step={10}
+                                value={[talkbackEffects.echo.delay]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, echo: { ...talkbackEffects.echo, delay: v } })}
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Decay</span>
+                                <span>{talkbackEffects.echo.decay.toFixed(2)}</span>
+                              </div>
+                              <Slider
+                                min={0} max={1} step={0.05}
+                                value={[talkbackEffects.echo.decay]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, echo: { ...talkbackEffects.echo, decay: v } })}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Chorus */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Chorus</Label>
+                            <Switch
+                              checked={talkbackEffects.chorus.enabled}
+                              onCheckedChange={(v) => setTalkbackEffects({ ...talkbackEffects, chorus: { ...talkbackEffects.chorus, enabled: v } })}
+                            />
+                          </div>
+                          {talkbackEffects.chorus.enabled && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Depth</span>
+                                <span>{talkbackEffects.chorus.depth.toFixed(2)}</span>
+                              </div>
+                              <Slider
+                                min={0.1} max={1} step={0.05}
+                                value={[talkbackEffects.chorus.depth]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, chorus: { ...talkbackEffects.chorus, depth: v } })}
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Speed</span>
+                                <span>{talkbackEffects.chorus.speed.toFixed(1)} Hz</span>
+                              </div>
+                              <Slider
+                                min={0.5} max={5} step={0.1}
+                                value={[talkbackEffects.chorus.speed]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, chorus: { ...talkbackEffects.chorus, speed: v } })}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Flanger */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Flanger</Label>
+                            <Switch
+                              checked={talkbackEffects.flanger.enabled}
+                              onCheckedChange={(v) => setTalkbackEffects({ ...talkbackEffects, flanger: { ...talkbackEffects.flanger, enabled: v } })}
+                            />
+                          </div>
+                          {talkbackEffects.flanger.enabled && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Delay</span>
+                                <span>{talkbackEffects.flanger.delay}ms</span>
+                              </div>
+                              <Slider
+                                min={1} max={20} step={1}
+                                value={[talkbackEffects.flanger.delay]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, flanger: { ...talkbackEffects.flanger, delay: v } })}
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Depth</span>
+                                <span>{talkbackEffects.flanger.depth}</span>
+                              </div>
+                              <Slider
+                                min={1} max={10} step={1}
+                                value={[talkbackEffects.flanger.depth]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, flanger: { ...talkbackEffects.flanger, depth: v } })}
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Speed</span>
+                                <span>{talkbackEffects.flanger.speed.toFixed(1)} Hz</span>
+                              </div>
+                              <Slider
+                                min={0.1} max={5} step={0.1}
+                                value={[talkbackEffects.flanger.speed]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, flanger: { ...talkbackEffects.flanger, speed: v } })}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Vibrato */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Vibrato</Label>
+                            <Switch
+                              checked={talkbackEffects.vibrato.enabled}
+                              onCheckedChange={(v) => setTalkbackEffects({ ...talkbackEffects, vibrato: { ...talkbackEffects.vibrato, enabled: v } })}
+                            />
+                          </div>
+                          {talkbackEffects.vibrato.enabled && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Frequency</span>
+                                <span>{talkbackEffects.vibrato.frequency.toFixed(1)} Hz</span>
+                              </div>
+                              <Slider
+                                min={1} max={20} step={0.5}
+                                value={[talkbackEffects.vibrato.frequency]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, vibrato: { ...talkbackEffects.vibrato, frequency: v } })}
+                              />
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Depth</span>
+                                <span>{talkbackEffects.vibrato.depth.toFixed(2)}</span>
+                              </div>
+                              <Slider
+                                min={0.05} max={1} step={0.05}
+                                value={[talkbackEffects.vibrato.depth]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, vibrato: { ...talkbackEffects.vibrato, depth: v } })}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Tempo */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Tempo</Label>
+                            <Switch
+                              checked={talkbackEffects.tempo.enabled}
+                              onCheckedChange={(v) => setTalkbackEffects({ ...talkbackEffects, tempo: { ...talkbackEffects.tempo, enabled: v } })}
+                            />
+                          </div>
+                          {talkbackEffects.tempo.enabled && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Factor</span>
+                                <span>{talkbackEffects.tempo.factor.toFixed(2)}x</span>
+                              </div>
+                              <Slider
+                                min={0.5} max={2} step={0.05}
+                                value={[talkbackEffects.tempo.factor]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, tempo: { ...talkbackEffects.tempo, factor: v } })}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Autotune */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs">Autotune</Label>
+                            <Switch
+                              checked={talkbackEffects.autotune.enabled}
+                              onCheckedChange={(v) => setTalkbackEffects({ ...talkbackEffects, autotune: { ...talkbackEffects.autotune, enabled: v } })}
+                            />
+                          </div>
+                          {talkbackEffects.autotune.enabled && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Key</span>
+                              </div>
+                              <Select
+                                value={talkbackEffects.autotune.key}
+                                onValueChange={(v) => setTalkbackEffects({ ...talkbackEffects, autotune: { ...talkbackEffects.autotune, key: v } })}
+                              >
+                                <SelectTrigger className="text-xs h-7">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {AUTOTUNE_KEYS.map((k) => (
+                                    <SelectItem key={k} value={k}>{k}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Strength</span>
+                                <span>{talkbackEffects.autotune.strength.toFixed(2)}</span>
+                              </div>
+                              <Slider
+                                min={0} max={1} step={0.05}
+                                value={[talkbackEffects.autotune.strength]}
+                                onValueChange={([v]) => setTalkbackEffects({ ...talkbackEffects, autotune: { ...talkbackEffects.autotune, strength: v } })}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </PopoverContent>
                   </Popover>
                 </div>
@@ -1613,7 +1915,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               >
                 <Radio className="mr-2 h-4 w-4" />
                 {talkbackActive ? "Release to Stop" : "Hold to Talk"}
-                <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">K</kbd>
+                <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">K</kbd>
               </Button>
               {talkbackActive && (
                 <div className="h-2 rounded-full bg-muted overflow-hidden">
@@ -1646,7 +1948,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                     : clientRecording
                       ? `Stop (${formatDuration(clientRecordElapsed)})`
                       : "Record"}
-                  <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5">C</kbd>
+                  <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">C</kbd>
                 </Button>
                 <Label htmlFor="client-record-btn" className="text-xs text-muted-foreground mt-2">
                   Record from browser mic
@@ -1659,7 +1961,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
         <Card>
           <button
             type="button"
-            className="flex w-full items-center justify-between px-6 text-left cursor-pointer"
+            className="flex w-full items-center justify-between px-6 text-left"
             onClick={() => setMixerOpen((o) => !o)}
             aria-expanded={mounted && mixerOpen}
             aria-controls="mixer-panel"
@@ -1715,25 +2017,83 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
 
         {/* Recordings List (collapsible) */}
         <Card>
-          <button
-            type="button"
-            className="flex w-full items-center justify-between px-6 text-left cursor-pointer"
-            onClick={() => setRecordingsOpen((o) => !o)}
-            aria-expanded={mounted && recordingsOpen}
-            aria-controls="recordings-panel"
-          >
-            <div>
-              <CardTitle className="text-lg" role="heading" aria-level={2}>Recordings</CardTitle>
-              <CardDescription>
-                {recordings === null
-                  ? "Loading recordings..."
-                  : `${recordings.length} recording${recordings.length !== 1 ? "s" : ""} available`}
-              </CardDescription>
-            </div>
-            <ChevronDown
-              className={`h-5 w-5 text-muted-foreground ${mounted ? "transition-transform duration-200 opacity-100" : "opacity-0"} ${mounted && recordingsOpen ? "rotate-180" : ""}`}
-            />
-          </button>
+          <div className="flex w-full items-center justify-between gap-2 px-6">
+            <button
+              type="button"
+              className="flex flex-1 items-center justify-between text-left"
+              onClick={() => setRecordingsOpen((o) => !o)}
+              aria-expanded={mounted && recordingsOpen}
+              aria-controls="recordings-panel"
+            >
+              <div>
+                <CardTitle className="text-lg" role="heading" aria-level={2}>Recordings</CardTitle>
+                <CardDescription className="flex items-center justify-between gap-2">
+                  <span>{recordings === null
+                    ? "Loading recordings..."
+                    : `${recordings.length} recording${recordings.length !== 1 ? "s" : ""} available`}</span>
+                  {playbackState === null ? (
+                    <span className="flex items-center gap-1 text-xs text-foreground/60">
+                      <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden="true" />
+                    </span>
+                  ) : playbackState.devices.find((d) => d.alsaId === playbackState.selected)?.cardName ? (
+                    <span className="flex items-center gap-1 truncate text-xs font-medium text-foreground/60">
+                      <Volume2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      {playbackState.devices.find((d) => d.alsaId === playbackState.selected)!.cardName}
+                    </span>
+                  ) : null}
+                </CardDescription>
+              </div>
+            </button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Server playback settings">
+                  <Cog className="h-3.5 w-3.5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64" align="end">
+                {playbackState && playbackState.devices.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Playback Device</p>
+                    <Select
+                      value={playbackState.selected}
+                      onValueChange={selectPlaybackDevice}
+                      disabled={status?.server_playback !== null}
+                    >
+                      <SelectTrigger className="text-xs h-8" aria-label="Playback device">
+                        <SelectValue placeholder="Select device...">
+                          {playbackState.devices.find((d) => d.alsaId === playbackState.selected)?.cardName ?? playbackState.selected}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {playbackState.devices.map((d) => (
+                          <SelectItem key={d.alsaId} value={d.alsaId} textValue={d.cardName}>
+                            <span>{d.cardName}</span>
+                            <span className="text-muted-foreground text-xs">{d.alsaId}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Loading devices...</span>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+            <button
+              type="button"
+              onClick={() => setRecordingsOpen((o) => !o)}
+              aria-expanded={mounted && recordingsOpen}
+              aria-controls="recordings-panel"
+              aria-label={mounted && recordingsOpen ? "Collapse recordings" : "Expand recordings"}
+            >
+              <ChevronDown
+                className={`h-5 w-5 text-muted-foreground ${mounted ? "transition-transform duration-200 opacity-100" : "opacity-0"} ${mounted && recordingsOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+          </div>
           {mounted && recordingsOpen && (
           <CardContent id="recordings-panel">
             {recordings === null ? (
@@ -1780,6 +2140,19 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                     </Button>
                   ))}
                 </div>
+                {recordingDevices.length > 1 && (
+                  <Select value={recordingsDeviceFilter} onValueChange={setRecordingsDeviceFilter}>
+                    <SelectTrigger className="h-9 w-auto min-w-[120px] text-xs" aria-label="Filter by device">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All devices</SelectItem>
+                      {recordingDevices.map(([name, count]) => (
+                        <SelectItem key={name} value={name}>{name} ({count})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               {filteredRecordings && filteredRecordings.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-4 text-center">
@@ -1796,16 +2169,17 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                     <TableHead className="w-20">Duration</TableHead>
                     <TableHead className="w-20">Size</TableHead>
                     <TableHead>Device</TableHead>
-                    <TableHead className="w-32 text-right">Actions</TableHead>
+                    <TableHead className="w-40 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {visibleRecordings?.map((rec) => {
                     const isActive = status.recording && rec.filename === status.recording_file;
                     const isPlaying = playingFile === rec.filename;
+                    const isServerPlaying = serverPlayingFile === rec.filename || status.server_playback?.filename === rec.filename;
                     return (
                     <React.Fragment key={rec.filename}>
-                    <TableRow className={`${isActive ? "bg-red-500/10" : ""} ${isPlaying ? "border-b-0 bg-muted/50" : ""}`}>
+                    <TableRow className={`${isActive ? "bg-red-500/10" : ""} ${isServerPlaying ? "bg-primary/5" : ""} ${isPlaying ? "border-b-0 bg-muted/50" : ""}`}>
                       <TableCell className="font-mono text-sm">
                         <span className="flex items-center gap-2">
                           <span>{rec.filename}</span>
@@ -1830,6 +2204,17 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-9 w-9 ${isServerPlaying ? "text-primary" : ""}`}
+                            onClick={() => isServerPlaying ? stopServerPlayback() : startServerPlayback(rec.filename)}
+                            disabled={isActive}
+                            aria-label={isServerPlaying ? "Stop server playback" : "Play on server"}
+                            title={isServerPlaying ? "Stop server playback" : "Play on server"}
+                          >
+                            {isServerPlaying ? <Square className="h-4 w-4" aria-hidden="true" /> : <Speaker className="h-4 w-4" aria-hidden="true" />}
+                          </Button>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -1925,10 +2310,16 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                 </TableBody>
               </Table>
               <div ref={sentinelRef} />
+              {filteredRecordings && visibleRecordings && visibleRecordings.length < filteredRecordings.length && (
+                <div className="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Loading more...
+                </div>
+              )}
               {filteredRecordings && visibleRecordings && (
                 <p className="text-xs text-muted-foreground text-center pt-2">
                   Showing {visibleRecordings.length} of {filteredRecordings.length} recording{filteredRecordings.length !== 1 ? "s" : ""}
-                  {(recordingsSearch || recordingsDateFilter !== "all") && recordings ? ` (${recordings.length} total)` : ""}
+                  {(recordingsSearch || recordingsDateFilter !== "all" || recordingsDeviceFilter !== "all") && recordings ? ` (${recordings.length} total)` : ""}
                 </p>
               )}
               </>

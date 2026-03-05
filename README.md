@@ -1,6 +1,6 @@
 # Auris
 
-Remote audio console for monitoring, recording, and two-way communication. Streams live audio via Icecast2, records to disk (server and client), and provides push-to-talk intercom — all controlled through a Next.js web UI.
+Remote audio console for monitoring, recording, and two-way communication. Streams live audio via Icecast2, records to disk (server and client), provides push-to-talk intercom, and plays recordings through the server speaker — all controlled through a Next.js web UI.
 
 ![Auris screenshot](screenshot-v2.jpg)
 
@@ -18,11 +18,11 @@ Browser  ──>  Nginx (:80/:443)  ──>  Next.js (:3075)   ── API ──
                                                                  (ALSA capture)
 ```
 
-- **Next.js** (app router, TypeScript, Tailwind, shadcn/ui) — web UI + API routes
+- **Next.js** (app router, TypeScript, Tailwind, shadcn/ui, nuqs) — web UI + API routes
 - **Auth.js v5** (next-auth) — optional username/password authentication with JWT sessions
 - **SQLite** (better-sqlite3, Drizzle ORM) — recording metadata and device info
 - **Icecast2** — audio streaming server (localhost only, proxied by Nginx)
-- **ffmpeg** — captures ALSA audio for streaming and/or recording
+- **ffmpeg** — captures ALSA audio for streaming, recording, and server-side playback
 - **systemd** — manages capture processes (`auris-stream`, `auris-record` services)
 - **Nginx** — reverse proxy under a single hostname
 - **PM2** — process manager for the Next.js production server
@@ -32,6 +32,8 @@ Two independent systemd services:
 - **`auris-record`**: Reads Icecast stream with `-c copy` (no re-encoding). Only runs when recording.
 
 Toggling recording starts/stops only `auris-record` — the Icecast stream is never interrupted.
+
+Server-side playback uses ffmpeg to decode MP3 recordings directly to the ALSA output device. Talkback and server playback are mutually exclusive — talkback takes priority.
 
 ## Quick setup
 
@@ -217,7 +219,7 @@ auris/
 │   │   ├── stream/[...path]/route.ts  # Proxies /stream/* to Icecast
 │   │   ├── globals.css                 # Tailwind + shadcn/ui theme (light/dark)
 │   │   └── api/
-│   │       ├── status/route.ts         # GET  — stream/record status
+│   │       ├── status/route.ts         # GET  — stream/record/playback status
 │   │       ├── auth/
 │   │       │   ├── [...nextauth]/route.ts  # Auth.js route handler
 │   │       │   └── enabled/route.ts    # GET  — check if auth is enabled
@@ -230,13 +232,17 @@ auris/
 │   │       │   └── stop/route.ts       # POST — stop recording (updates DB row)
 │   │       ├── recordings/
 │   │       │   ├── route.ts            # GET  — list recordings from DB
+│   │       │   ├── upload/route.ts     # POST — upload client-recorded audio
 │   │       │   └── [filename]/
 │   │       │       ├── route.ts        # GET  — stream file, DELETE — remove
 │   │       │       └── waveform/route.ts # GET — waveform peaks data
 │   │       └── audio/
 │   │           ├── devices/route.ts    # GET  — list ALSA capture devices
-│   │           ├── device/route.ts     # POST — select capture device
+│   │           ├── device/route.ts     # GET/POST — get/set device selections (record, listen, playback)
 │   │           ├── bitrate/route.ts    # GET/POST — stream/record bitrate
+│   │           ├── chunk/route.ts      # POST — receive talkback audio chunk
+│   │           ├── playback/route.ts   # GET/POST — browser playback device selection
+│   │           ├── playback/server/route.ts # GET/POST/DELETE — server-side playback control
 │   │           ├── mixer/route.ts      # GET/POST — read/set mixer levels
 │   │           └── mixer/all/route.ts  # GET — all mixer controls per card
 │   ├── components/
@@ -245,16 +251,18 @@ auris/
 │   │   ├── level-meter.tsx             # WebAudio RMS/dB level meter
 │   │   ├── live-waveform.tsx           # Real-time waveform visualization
 │   │   ├── waveform-player.tsx         # Canvas waveform player with seek, play/pause
-│   │   ├── card-mixer.tsx              # ALSA mixer card component
+│   │   ├── card-mixer.tsx              # ALSA mixer card component (capture + playback volume)
 │   │   └── theme-provider.tsx          # next-themes wrapper
 │   ├── hooks/
 │   │   └── use-local-storage.ts       # Generic localStorage hook (SSR-safe)
 │   └── lib/
 │       ├── utils.ts                    # cn() helper
 │       ├── systemctl.ts                # systemctl wrapper
-│       ├── alsa.ts                     # ALSA device & mixer operations
-│       ├── device-config.ts            # /etc/default/auris read/write (devices, capture)
+│       ├── alsa.ts                     # ALSA device & mixer operations (capture + playback)
+│       ├── device-config.ts            # /etc/default/auris read/write (record, listen, playback devices)
 │       ├── auth-config.ts              # /etc/default/auris read (auth credentials)
+│       ├── server-playback.ts          # Server-side playback (ffmpeg MP3 → ALSA)
+│       ├── talkback.ts                 # Talkback audio (browser PCM → ALSA)
 │       ├── waveform.ts                 # Waveform generation (ffmpeg PCM → peaks)
 │       └── db/
 │           ├── schema.ts               # Drizzle schema (recordings table)
@@ -283,7 +291,7 @@ auris/
 
 | File | What to change |
 |---|---|
-| `/etc/default/auris` | `ALSA_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH` |
+| `/etc/default/auris` | `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH` |
 | `.env.local` | `RECORDINGS_DIR`, `DATABASE_PATH`, `NEXT_PUBLIC_STREAM_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST` (see `.env.example`) |
 | `system/icecast.xml` | Passwords, listen address |
 | `system/nginx-auris.conf` | `server_name` hostname |

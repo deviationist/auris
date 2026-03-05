@@ -33,13 +33,14 @@ export interface CardMixerState {
   capture: MixerVolume | null;
   micBoost: MixerVolume | null;
   inputSource: MixerEnum | null;
+  playbackVolume: MixerVolume | null;
 }
 
 interface CardMixerProps {
   mixer: CardMixerState;
   onUpdateMixer: (
     card: number,
-    updates: Partial<{ capture: number; micBoost: number; inputSource: string }>
+    updates: Partial<{ capture: number; micBoost: number; inputSource: string; playbackVolume: number }>
   ) => Promise<void>;
   loading: boolean;
 }
@@ -47,8 +48,9 @@ interface CardMixerProps {
 export function CardMixer({ mixer, onUpdateMixer, loading }: CardMixerProps) {
   const [localCapture, setLocalCapture] = useState<number | null>(null);
   const [localBoost, setLocalBoost] = useState<number | null>(null);
+  const [localPlayback, setLocalPlayback] = useState<number | null>(null);
 
-  const hasMixer = mixer.capture || mixer.micBoost || mixer.inputSource;
+  const hasMixer = mixer.capture || mixer.micBoost || mixer.inputSource || mixer.playbackVolume;
   if (!hasMixer) {
     return (
       <p className="text-sm text-muted-foreground py-2">
@@ -59,6 +61,31 @@ export function CardMixer({ mixer, onUpdateMixer, loading }: CardMixerProps) {
 
   return (
     <div className="space-y-6">
+      {mixer.playbackVolume && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label>Output Volume</Label>
+            <span className="text-sm text-muted-foreground font-mono">
+              {localPlayback !== null
+                ? `${Math.round((localPlayback / mixer.playbackVolume.max) * 100)}%`
+                : `${mixer.playbackVolume.percent}% (${mixer.playbackVolume.dB})`}
+            </span>
+          </div>
+          <Slider
+            value={[localPlayback ?? mixer.playbackVolume.value]}
+            min={mixer.playbackVolume.min}
+            max={mixer.playbackVolume.max}
+            step={1}
+            onValueChange={(v) => setLocalPlayback(v[0])}
+            onValueCommit={async (v) => {
+              await onUpdateMixer(mixer.card, { playbackVolume: v[0] });
+              setLocalPlayback(null);
+            }}
+            disabled={loading}
+          />
+        </div>
+      )}
+
       {mixer.capture && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -75,9 +102,9 @@ export function CardMixer({ mixer, onUpdateMixer, loading }: CardMixerProps) {
             max={mixer.capture.max}
             step={1}
             onValueChange={(v) => setLocalCapture(v[0])}
-            onValueCommit={(v) => {
+            onValueCommit={async (v) => {
+              await onUpdateMixer(mixer.card, { capture: v[0] });
               setLocalCapture(null);
-              onUpdateMixer(mixer.card, { capture: v[0] });
             }}
             disabled={loading}
           />
@@ -98,9 +125,9 @@ export function CardMixer({ mixer, onUpdateMixer, loading }: CardMixerProps) {
             max={3}
             step={1}
             onValueChange={(v) => setLocalBoost(v[0])}
-            onValueCommit={(v) => {
+            onValueCommit={async (v) => {
+              await onUpdateMixer(mixer.card, { micBoost: v[0] });
               setLocalBoost(null);
-              onUpdateMixer(mixer.card, { micBoost: v[0] });
             }}
             disabled={loading}
           />

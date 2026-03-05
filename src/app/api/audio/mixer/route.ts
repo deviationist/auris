@@ -3,9 +3,11 @@ import {
   getCaptureVolume,
   getMicBoost,
   getInputSource,
+  getPlaybackVolume,
   setCaptureVolume,
   setMicBoost,
   setInputSource,
+  setPlaybackVolume,
 } from "@/lib/alsa";
 
 export const dynamic = "force-dynamic";
@@ -14,12 +16,13 @@ export async function GET(request: NextRequest) {
   try {
     const cardParam = request.nextUrl.searchParams.get("card");
     const card = cardParam !== null ? parseInt(cardParam, 10) : 0;
-    const [capture, micBoost, inputSource] = await Promise.all([
+    const [capture, micBoost, inputSource, playbackVolume] = await Promise.all([
       getCaptureVolume(card),
       getMicBoost(card),
       getInputSource(card),
+      getPlaybackVolume(card),
     ]);
-    return NextResponse.json({ capture, micBoost, inputSource });
+    return NextResponse.json({ capture, micBoost, inputSource, playbackVolume });
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to read mixer", detail: String(error) },
@@ -61,6 +64,18 @@ export async function POST(request: NextRequest) {
     if (body.inputSource !== undefined) {
       await setInputSource(String(body.inputSource), card);
       updated.push("inputSource");
+    }
+
+    if (body.playbackVolume !== undefined) {
+      const val = Number(body.playbackVolume);
+      if (isNaN(val) || val < 0) {
+        return NextResponse.json(
+          { error: "Invalid playback volume" },
+          { status: 400 }
+        );
+      }
+      await setPlaybackVolume(val, card);
+      updated.push("playbackVolume");
     }
 
     return NextResponse.json({ ok: true, updated });
