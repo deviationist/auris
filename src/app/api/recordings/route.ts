@@ -32,10 +32,12 @@ export async function GET() {
         }
         return {
           filename: row.filename,
+          name: row.name ?? null,
           size: size ?? 0,
           createdAt: row.createdAt.getTime(),
           duration: row.duration,
           device: row.device,
+          metadata: row.metadata ? JSON.parse(row.metadata) : null,
           waveformHash: row.waveformHash ?? null,
         };
       })

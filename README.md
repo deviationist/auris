@@ -1,6 +1,6 @@
 # Auris
 
-Remote audio console for monitoring, recording, and two-way communication. Streams live audio via Icecast2, records to disk (server and client), provides push-to-talk intercom, and plays recordings through the server speaker — all controlled through a Next.js web UI.
+Remote audio console for monitoring, recording, and two-way communication. Streams live audio via Icecast2, records to disk (server and client), provides push-to-talk intercom with voice effects, and plays recordings through the server speaker — all controlled through a Next.js web UI.
 
 ![Auris screenshot](screenshot-v2.jpg)
 
@@ -34,6 +34,8 @@ Two independent systemd services:
 Toggling recording starts/stops only `auris-record` — the Icecast stream is never interrupted.
 
 Server-side playback uses ffmpeg to decode MP3 recordings directly to the ALSA output device. Talkback and server playback are mutually exclusive — talkback takes priority.
+
+Voice effects (pitch shift, echo, chorus, flanger, vibrato, tempo, autotune) can be applied to both talkback and client recordings. Effects are processed server-side via ffmpeg audio filters. Client recordings store effects metadata in the database for later reference.
 
 ## Quick setup
 
@@ -234,7 +236,7 @@ auris/
 │   │       │   ├── route.ts            # GET  — list recordings from DB
 │   │       │   ├── upload/route.ts     # POST — upload client-recorded audio
 │   │       │   └── [filename]/
-│   │       │       ├── route.ts        # GET  — stream file, DELETE — remove
+│   │       │       ├── route.ts        # GET  — stream file, PATCH — rename, DELETE — remove
 │   │       │       └── waveform/route.ts # GET — waveform peaks data
 │   │       └── audio/
 │   │           ├── devices/route.ts    # GET  — list ALSA capture devices
@@ -263,9 +265,10 @@ auris/
 │       ├── auth-config.ts              # /etc/default/auris read (auth credentials)
 │       ├── server-playback.ts          # Server-side playback (ffmpeg MP3 → ALSA)
 │       ├── talkback.ts                 # Talkback audio (browser PCM → ALSA)
+│       ├── talkback-effects.ts         # Voice effects config & ffmpeg filter chain builder
 │       ├── waveform.ts                 # Waveform generation (ffmpeg PCM → peaks)
 │       └── db/
-│           ├── schema.ts               # Drizzle schema (recordings table)
+│           ├── schema.ts               # Drizzle schema (recordings: name, metadata, waveform, etc.)
 │           └── index.ts                # DB singleton, migrations, sync
 ├── scripts/
 │   ├── generate-waveforms.mjs          # CLI: generate/clear waveform data in DB

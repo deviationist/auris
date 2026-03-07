@@ -73,6 +73,33 @@ export async function GET(
   }
 }
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ filename: string }> }
+) {
+  const { filename } = await params;
+
+  const safe = basename(filename);
+  if (safe !== filename || !filename.endsWith(".mp3")) {
+    return NextResponse.json({ error: "Invalid filename" }, { status: 400 });
+  }
+
+  try {
+    const body = await request.json();
+    const name = typeof body.name === "string" ? body.name.trim() || null : null;
+
+    const db = getDb();
+    await db.update(recordings).set({ name }).where(eq(recordings.filename, safe));
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Failed to update recording", detail: String(error) },
+      { status: 500 },
+    );
+  }
+}
+
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ filename: string }> }

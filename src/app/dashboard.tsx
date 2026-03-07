@@ -25,6 +25,9 @@ import {
   Radio,
   Search,
   Speaker,
+  Pencil,
+  Check,
+  Sparkles,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { toast } from "sonner";
@@ -104,10 +107,12 @@ interface Status {
 
 interface Recording {
   filename: string;
+  name: string | null;
   size: number;
   createdAt: number;
   duration: number | null;
   device: string | null;
+  metadata: Record<string, unknown> | null;
   waveformHash: string | null;
 }
 
@@ -194,6 +199,8 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const [stopRecordDialogOpen, setStopRecordDialogOpen] = useState(false);
   const [playingFile, setPlayingFile] = useState<string | null>(null);
   const [serverPlayingFile, setServerPlayingFile] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editingNameValue, setEditingNameValue] = useState("");
   const serverPlaybackPending = useRef(false);
   const [cardMixers, setCardMixers] = useState<CardMixerState[] | null>(null);
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null);
@@ -226,6 +233,8 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
 
   // Talkback state
   const [talkbackEffects, setTalkbackEffects] = useLocalStorage<TalkbackEffects>("talkback-effects", DEFAULT_EFFECTS);
+  const talkbackEffectsRef = useRef(talkbackEffects);
+  talkbackEffectsRef.current = talkbackEffects;
   const [talkbackActive, setTalkbackActive] = useState(false);
   const [talkbackLevel, setTalkbackLevel] = useState(0);
   const [talkbackRejected, setTalkbackRejected] = useState(false);
@@ -719,7 +728,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const params = new URLSearchParams();
-      params.set("effects", JSON.stringify(talkbackEffects));
+      params.set("effects", JSON.stringify(talkbackEffectsRef.current));
       const ws = new WebSocket(`${protocol}//${window.location.host}/ws/talkback?${params}`);
       ws.binaryType = "arraybuffer";
       talkbackWsRef.current = ws;
@@ -837,6 +846,14 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
         try {
           const form = new FormData();
           form.append("audio", blob, "recording.webm");
+          // Include voice effects so the server applies them during transcode
+          const currentEffects = talkbackEffectsRef.current;
+          const hasActiveEffects = Object.values(currentEffects).some(
+            (effect) => typeof effect === "object" && "enabled" in effect && effect.enabled
+          );
+          if (hasActiveEffects) {
+            form.append("effects", JSON.stringify(currentEffects));
+          }
           const res = await fetch("/api/recordings/upload", { method: "POST", body: form });
           if (res.ok) {
             toast.success("Client recording uploaded");
@@ -921,6 +938,25 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     } catch {
       toast.error("Failed to delete recording");
     }
+  }
+
+  async function saveRecordingName(filename: string, name: string) {
+    try {
+      const res = await fetch(
+        `/api/recordings/${encodeURIComponent(filename)}`,
+        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }
+      );
+      if (res.ok) {
+        setRecordings((prev) =>
+          prev?.map((r) => r.filename === filename ? { ...r, name: name.trim() || null } : r) ?? null
+        );
+      } else {
+        toast.error("Failed to rename recording");
+      }
+    } catch {
+      toast.error("Failed to rename recording");
+    }
+    setEditingName(null);
   }
 
   function playRecording(filename: string) {
@@ -1081,7 +1117,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
 
     if (recordingsSearch.trim()) {
       const q = recordingsSearch.trim().toLowerCase();
-      filtered = filtered.filter(r => r.filename.toLowerCase().includes(q));
+      filtered = filtered.filter(r => r.filename.toLowerCase().includes(q) || r.name?.toLowerCase().includes(q));
     }
 
     if (recordingsDateFilter !== "all") {
@@ -2025,7 +2061,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               aria-expanded={mounted && recordingsOpen}
               aria-controls="recordings-panel"
             >
-              <div>
+              <div className="flex-1 min-w-0">
                 <CardTitle className="text-lg" role="heading" aria-level={2}>Recordings</CardTitle>
                 <CardDescription className="flex items-center justify-between gap-2">
                   <span>{recordings === null
@@ -2164,7 +2200,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                 <TableCaption className="sr-only">List of recorded audio files</TableCaption>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Filename</TableHead>
+                    <TableHead>Name</TableHead>
                     <TableHead className="w-28">Date</TableHead>
                     <TableHead className="w-20">Duration</TableHead>
                     <TableHead className="w-20">Size</TableHead>
@@ -2179,16 +2215,82 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                     const isServerPlaying = serverPlayingFile === rec.filename || status.server_playback?.filename === rec.filename;
                     return (
                     <React.Fragment key={rec.filename}>
-                    <TableRow className={`${isActive ? "bg-red-500/10" : ""} ${isServerPlaying ? "bg-primary/5" : ""} ${isPlaying ? "border-b-0 bg-muted/50" : ""}`}>
-                      <TableCell className="font-mono text-sm">
-                        <span className="flex items-center gap-2">
-                          <span>{rec.filename}</span>
-                          {isActive && (
-                            <Badge variant="secondary" className="bg-red-600 hover:bg-red-600 text-white text-xs animate-pulse">
-                              <Circle className="mr-1 h-2 w-2 fill-current" aria-hidden="true" /> REC
-                            </Badge>
+                    <TableRow className={`group/row ${isActive ? "bg-red-500/10" : ""} ${isServerPlaying ? "bg-primary/5" : ""} ${isPlaying ? "border-b-0 bg-muted/50" : ""}`}>
+                      <TableCell className="text-sm">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {editingName === rec.filename ? (
+                            <form
+                              className="flex items-center gap-1 flex-1 min-w-0"
+                              onSubmit={(e) => { e.preventDefault(); saveRecordingName(rec.filename, editingNameValue); }}
+                            >
+                              <Input
+                                autoFocus
+                                value={editingNameValue}
+                                onChange={(e) => setEditingNameValue(e.target.value)}
+                                onBlur={() => saveRecordingName(rec.filename, editingNameValue)}
+                                onKeyDown={(e) => { if (e.key === "Escape") setEditingName(null); }}
+                                className="h-7 text-sm flex-1 min-w-0"
+                                placeholder={rec.filename}
+                                aria-label="Recording name"
+                              />
+                              <Button type="submit" variant="ghost" size="icon" className="h-7 w-7 shrink-0" aria-label="Save name">
+                                <Check className="h-3.5 w-3.5" />
+                              </Button>
+                            </form>
+                          ) : (
+                            <>
+                              <span className="min-w-0">
+                                {rec.name ? (
+                                  <span className="flex flex-col">
+                                    <span className="truncate">{rec.name}</span>
+                                    <span className="text-muted-foreground font-mono text-xs truncate">{rec.filename}</span>
+                                  </span>
+                                ) : (
+                                  <span className="font-mono truncate">{rec.filename}</span>
+                                )}
+                              </span>
+                              {rec.metadata?.effects && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button type="button" className="inline-flex shrink-0" aria-label="Voice effects applied">
+                                      <Sparkles className="h-3.5 w-3.5 text-purple-400" aria-hidden="true" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="text-xs">
+                                    <p className="font-medium mb-1">Effects</p>
+                                    {Object.entries(rec.metadata.effects as Record<string, Record<string, unknown>>).map(([name, cfg]) => (
+                                      <p key={name} className="text-muted-foreground">
+                                        {name === "pitchShift" ? `Pitch ${(cfg.semitones as number) > 0 ? "+" : ""}${cfg.semitones} st`
+                                          : name === "echo" ? `Echo ${cfg.delay}ms`
+                                          : name === "chorus" ? "Chorus"
+                                          : name === "flanger" ? "Flanger"
+                                          : name === "vibrato" ? `Vibrato ${(cfg.frequency as number).toFixed?.(1) ?? cfg.frequency} Hz`
+                                          : name === "tempo" ? `Tempo ${cfg.factor}x`
+                                          : name === "autotune" ? `Autotune (${cfg.key})`
+                                          : name}
+                                      </p>
+                                    ))}
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 shrink-0 opacity-0 group-hover/row:opacity-100 focus:opacity-100 transition-opacity"
+                                onClick={() => { setEditingName(rec.filename); setEditingNameValue(rec.name || ""); }}
+                                aria-label="Rename"
+                                title="Rename"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                              {isActive && (
+                                <Badge variant="secondary" className="bg-red-600 hover:bg-red-600 text-white text-xs animate-pulse shrink-0">
+                                  <Circle className="mr-1 h-2 w-2 fill-current" aria-hidden="true" /> REC
+                                </Badge>
+                              )}
+                            </>
                           )}
-                        </span>
+                        </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatDate(rec.createdAt)}

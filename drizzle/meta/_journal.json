@@ -22,6 +22,13 @@
       "when": 1772284020769,
       "tag": "0002_bumpy_loki",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1772877487766,
+      "tag": "0003_jittery_magik",
+      "breakpoints": true
     }
   ]
 }

@@ -54,6 +54,7 @@ Toggling recording starts/stops only `auris-record` — the Icecast stream is ne
 | `src/lib/auth-config.ts` | Read auth credentials from `/etc/default/auris` |
 | `src/lib/server-playback.ts` | Server-side playback: ffmpeg MP3 → ALSA output (globalThis singleton) |
 | `src/lib/talkback.ts` | Browser-to-server talkback: receives PCM audio, plays via ALSA |
+| `src/lib/talkback-effects.ts` | Voice effects definitions and ffmpeg filter chain builder |
 | `src/lib/waveform.ts` | Shared waveform generation (ffmpeg PCM → peaks JSON) |
 | `src/lib/db/schema.ts` | Drizzle ORM schema (recordings table) |
 | `src/lib/db/index.ts` | DB singleton, auto-migration, disk→DB sync |
@@ -96,6 +97,10 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`
 - Server playback uses `globalThis` singleton to survive HMR in dev mode
 - Server playback and talkback are mutually exclusive (talkback takes priority)
+- Voice effects (pitch shift, echo, chorus, flanger, vibrato, tempo, autotune) apply to both talkback and client recordings via ffmpeg filters (`buildFilterChain` in `talkback-effects.ts`)
+- Client recordings upload with effects metadata stored as JSON in the `metadata` column; effects are applied server-side during webm→MP3 transcode
+- Recordings support optional display names (`name` column) with inline editing in the UI
+- Use refs (e.g. `talkbackEffectsRef`) for values accessed in stale closures (keyboard handlers, MediaRecorder callbacks)
 - Auth is optional: omit `AUTH_USERNAME`/`AUTH_PASSWORD_HASH` to disable. `src/proxy.ts` checks `isAuthEnabled()` and skips auth when unconfigured.
 - `.env.local` — `AUTH_SECRET` (required when auth enabled), `AUTH_TRUST_HOST=true`
 - Sudoers at `system/auris-sudoers` — update when adding new privileged commands

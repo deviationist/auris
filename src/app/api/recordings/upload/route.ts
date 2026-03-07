@@ -9,6 +9,7 @@ import { randomBytes } from "crypto";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
 import { generateWaveform, hashWaveform } from "@/lib/waveform";
+import { buildFilterChain, DEFAULT_EFFECTS, type TalkbackEffects } from "@/lib/talkback-effects";
 
 const execFileAsync = promisify(execFile);
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
@@ -50,11 +51,13 @@ async function getDuration(filePath: string): Promise<number | null> {
   }
 }
 
-function transcode(inputPath: string, outputPath: string): Promise<void> {
+function transcode(inputPath: string, outputPath: string, effects?: TalkbackEffects): Promise<void> {
+  const filters = effects ? buildFilterChain(effects) : [];
   return new Promise((resolve, reject) => {
     const proc = spawn("ffmpeg", [
       "-y",
       "-i", inputPath,
+      ...filters,
       "-acodec", "libmp3lame",
       "-ab", "128k",
       "-ar", "44100",
@@ -80,19 +83,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No audio file provided" }, { status: 400 });
     }
 
+    // Parse voice effects (if any)
+    let effects: TalkbackEffects | undefined;
+    const effectsRaw = formData.get("effects") as string | null;
+    if (effectsRaw) {
+      try {
+        effects = { ...DEFAULT_EFFECTS, ...JSON.parse(effectsRaw) };
+      } catch {}
+    }
+
     // Write uploaded blob to temp file
     const buf = Buffer.from(await file.arrayBuffer());
     tmpPath = join(tmpdir(), `auris-upload-${randomBytes(8).toString("hex")}.webm`);
     await writeFile(tmpPath, buf);
 
-    // Transcode to MP3
+    // Transcode to MP3 (with effects if provided)
     const filename = generateFilename();
     const mp3Path = join(RECORDINGS_DIR, filename);
-    await transcode(tmpPath, mp3Path);
+    await transcode(tmpPath, mp3Path, effects);
 
     // Get file info
     const { size } = await import("fs/promises").then((fs) => fs.stat(mp3Path));
     const duration = await getDuration(mp3Path);
+
+    // Build metadata
+    const meta: Record<string, unknown> = {};
+    if (effects) {
+      const activeEffects = Object.fromEntries(
+        Object.entries(effects).filter(([, v]) => typeof v === "object" && v !== null && "enabled" in v && v.enabled)
+      );
+      if (Object.keys(activeEffects).length > 0) {
+        meta.effects = activeEffects;
+      }
+    }
 
     // Insert into DB
     const db = getDb();
@@ -103,6 +126,7 @@ export async function POST(req: NextRequest) {
         size,
         duration,
         device: "Client",
+        metadata: Object.keys(meta).length > 0 ? JSON.stringify(meta) : null,
         createdAt: new Date(),
       })
       .onConflictDoNothing();
