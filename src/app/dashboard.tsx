@@ -2006,9 +2006,11 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               <CardTitle className="text-lg" role="heading" aria-level={2}>Mixer</CardTitle>
               <CardDescription>ALSA mixer levels per card</CardDescription>
             </div>
-            <ChevronDown
-              className={`h-5 w-5 text-muted-foreground ${mounted ? "transition-transform duration-200 opacity-100" : "opacity-0"} ${mounted && mixerOpen ? "rotate-180" : ""}`}
-            />
+            <div className="flex items-center justify-center h-7 w-7 shrink-0">
+              <ChevronDown
+                className={`h-5 w-5 text-muted-foreground ${mounted ? "transition-transform duration-200 opacity-100" : "opacity-0"} ${mounted && mixerOpen ? "rotate-180" : ""}`}
+              />
+            </div>
           </button>
           {mounted && mixerOpen && (
             <CardContent id="mixer-panel" className="pt-0">
@@ -2053,82 +2055,87 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
 
         {/* Recordings List (collapsible) */}
         <Card>
-          <div className="flex w-full items-center justify-between gap-2 px-6">
+          <div className="flex w-full items-start justify-between gap-2 px-6">
             <button
               type="button"
-              className="flex flex-1 items-center justify-between text-left"
+              className="flex flex-1 items-center justify-between text-left min-w-0"
               onClick={() => setRecordingsOpen((o) => !o)}
               aria-expanded={mounted && recordingsOpen}
               aria-controls="recordings-panel"
             >
-              <div className="flex-1 min-w-0">
+              <div className="min-w-0">
                 <CardTitle className="text-lg" role="heading" aria-level={2}>Recordings</CardTitle>
-                <CardDescription className="flex items-center justify-between gap-2">
-                  <span>{recordings === null
+                <CardDescription>
+                  {recordings === null
                     ? "Loading recordings..."
-                    : `${recordings.length} recording${recordings.length !== 1 ? "s" : ""} available`}</span>
-                  {playbackState === null ? (
-                    <span className="flex items-center gap-1 text-xs text-foreground/60">
-                      <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden="true" />
-                    </span>
-                  ) : playbackState.devices.find((d) => d.alsaId === playbackState.selected)?.cardName ? (
-                    <span className="flex items-center gap-1 truncate text-xs font-medium text-foreground/60">
-                      <Volume2 className="h-3 w-3 shrink-0" aria-hidden="true" />
-                      {playbackState.devices.find((d) => d.alsaId === playbackState.selected)!.cardName}
-                    </span>
-                  ) : null}
+                    : `${recordings.length} recording${recordings.length !== 1 ? "s" : ""} available`}
                 </CardDescription>
               </div>
             </button>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Server playback settings">
-                  <Cog className="h-3.5 w-3.5" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-64" align="end">
-                {playbackState && playbackState.devices.length > 0 ? (
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">Playback Device</p>
-                    <Select
-                      value={playbackState.selected}
-                      onValueChange={selectPlaybackDevice}
-                      disabled={status?.server_playback !== null}
-                    >
-                      <SelectTrigger className="text-xs h-8" aria-label="Playback device">
-                        <SelectValue placeholder="Select device...">
-                          {playbackState.devices.find((d) => d.alsaId === playbackState.selected)?.cardName ?? playbackState.selected}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {playbackState.devices.map((d) => (
-                          <SelectItem key={d.alsaId} value={d.alsaId} textValue={d.cardName}>
-                            <span>{d.cardName}</span>
-                            <span className="text-muted-foreground text-xs">{d.alsaId}</span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Loading devices...</span>
-                  </div>
-                )}
-              </PopoverContent>
-            </Popover>
-            <button
-              type="button"
-              onClick={() => setRecordingsOpen((o) => !o)}
-              aria-expanded={mounted && recordingsOpen}
-              aria-controls="recordings-panel"
-              aria-label={mounted && recordingsOpen ? "Collapse recordings" : "Expand recordings"}
-            >
-              <ChevronDown
-                className={`h-5 w-5 text-muted-foreground ${mounted ? "transition-transform duration-200 opacity-100" : "opacity-0"} ${mounted && recordingsOpen ? "rotate-180" : ""}`}
-              />
-            </button>
+            <div className="flex flex-col items-end gap-2 shrink-0">
+              <div className="flex items-center gap-1">
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Server playback settings">
+                      <Cog className="h-3.5 w-3.5" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64" align="end">
+                    {playbackState && playbackState.devices.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Playback Device</p>
+                        <Select
+                          value={playbackState.selected}
+                          onValueChange={selectPlaybackDevice}
+                          disabled={status?.server_playback !== null}
+                        >
+                          <SelectTrigger className="text-xs h-8" aria-label="Playback device">
+                            <SelectValue placeholder="Select device...">
+                              {playbackState.devices.find((d) => d.alsaId === playbackState.selected)?.cardName ?? playbackState.selected}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {playbackState.devices.map((d) => (
+                              <SelectItem key={d.alsaId} value={d.alsaId} textValue={d.cardName}>
+                                <span>{d.cardName}</span>
+                                <span className="text-muted-foreground text-xs">{d.alsaId}</span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Loading devices...</span>
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+                <button
+                  type="button"
+                  className="flex items-center justify-center h-7 w-7"
+                  onClick={() => setRecordingsOpen((o) => !o)}
+                  aria-expanded={mounted && recordingsOpen}
+                  aria-controls="recordings-panel"
+                  aria-label={mounted && recordingsOpen ? "Collapse recordings" : "Expand recordings"}
+                >
+                  <ChevronDown
+                    className={`h-5 w-5 text-muted-foreground ${mounted ? "transition-transform duration-200 opacity-100" : "opacity-0"} ${mounted && recordingsOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+              </div>
+              {playbackState === null ? (
+                <span className="flex items-center gap-1 text-xs text-foreground/60 pr-1">
+                  <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden="true" />
+                </span>
+              ) : playbackState.devices.find((d) => d.alsaId === playbackState.selected)?.cardName ? (
+                <span className="flex items-center gap-1 text-xs font-medium text-foreground/60 pr-1">
+                  <Volume2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  {playbackState.devices.find((d) => d.alsaId === playbackState.selected)!.cardName}
+                </span>
+              ) : null}
+            </div>
           </div>
           {mounted && recordingsOpen && (
           <CardContent id="recordings-panel">
@@ -2259,7 +2266,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                                   <TooltipContent side="top" className="text-xs">
                                     <p className="font-medium mb-1">Effects</p>
                                     {Object.entries(rec.metadata.effects as Record<string, Record<string, unknown>>).map(([name, cfg]) => (
-                                      <p key={name} className="text-muted-foreground">
+                                      <p key={name}>
                                         {name === "pitchShift" ? `Pitch ${(cfg.semitones as number) > 0 ? "+" : ""}${cfg.semitones} st`
                                           : name === "echo" ? `Echo ${cfg.delay}ms`
                                           : name === "chorus" ? "Chorus"
