@@ -10,5 +10,8 @@ export const recordings = sqliteTable("recordings", {
   metadata: text("metadata"),
   waveform: text("waveform"),
   waveformHash: text("waveform_hash"),
+  transcription: text("transcription"),
+  transcriptionLang: text("transcription_lang"),
+  transcriptionStatus: text("transcription_status"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });

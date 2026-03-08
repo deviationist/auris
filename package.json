@@ -15,7 +15,10 @@
     "waveforms:regenerate": "node --env-file=/etc/default/auris scripts/generate-waveforms.mjs --force",
     "waveforms:clear": "node --env-file=/etc/default/auris scripts/generate-waveforms.mjs --clear",
     "stop": "ss -tlnp 'sport = :3000' | grep -oP 'pid=\\K[0-9]+' | xargs -r kill",
-    "auth:set": "node scripts/set-auth.mjs"
+    "auth:set": "node scripts/set-auth.mjs",
+    "transcriptions:generate": "node --env-file=/etc/default/auris scripts/generate-transcriptions.mjs",
+    "transcriptions:regenerate": "node --env-file=/etc/default/auris scripts/generate-transcriptions.mjs --force",
+    "transcriptions:clear": "node --env-file=/etc/default/auris scripts/generate-transcriptions.mjs --clear"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

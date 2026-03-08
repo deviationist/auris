@@ -28,6 +28,11 @@ import {
   Pencil,
   Check,
   Sparkles,
+  FileText,
+  Copy,
+  Languages,
+  RotateCcw,
+  CircleHelp,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { toast } from "sonner";
@@ -95,6 +100,17 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { DEFAULT_EFFECTS, AUTOTUNE_KEYS, type TalkbackEffects } from "@/lib/talkback-effects";
 
+interface VoxStatus {
+  active: boolean;
+  state: "idle" | "monitoring" | "recording" | "tail_silence" | "finalizing";
+  currentLevel: number;
+  threshold: number;
+  recordingDuration: number;
+  recordingFilename: string | null;
+  silenceRemaining: number;
+  config: { threshold: number; triggerMs: number; preBufferSecs: number; postSilenceSecs: number };
+}
+
 interface Status {
   streaming: boolean;
   recording: boolean;
@@ -103,6 +119,7 @@ interface Status {
   record_chunk_minutes: number;
   client_record_max_minutes: number;
   server_playback: { filename: string; startedAt: number } | null;
+  vox: VoxStatus;
 }
 
 interface Recording {
@@ -114,6 +131,7 @@ interface Recording {
   device: string | null;
   metadata: Record<string, unknown> | null;
   waveformHash: string | null;
+  transcriptionStatus: "pending" | "processing" | "done" | "error" | null;
 }
 
 interface CaptureDevice {
@@ -181,6 +199,66 @@ function formatDate(ms: number): string {
 }
 
 
+function TranscriptionPanel({
+  filename,
+  transcription,
+  onLoad,
+  onRetranscribe,
+  transcribing,
+}: {
+  filename: string;
+  transcription: { text: string; language: string } | null;
+  onLoad: () => void;
+  onRetranscribe: () => void;
+  transcribing: boolean;
+}) {
+  useEffect(() => { onLoad(); }, [filename]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!transcription) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground py-1">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading transcription...
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <FileText className="h-3.5 w-3.5" />
+        <span>Transcription</span>
+        {transcription.language && transcription.language !== "auto" && (
+          <span className="bg-muted px-1.5 py-0.5 rounded text-[10px] uppercase">{transcription.language}</span>
+        )}
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => navigator.clipboard.writeText(transcription.text).then(() => toast.success("Copied to clipboard"))}
+            aria-label="Copy transcription"
+            title="Copy"
+          >
+            <Copy className="h-3 w-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={onRetranscribe}
+            disabled={transcribing}
+            aria-label="Re-transcribe"
+            title="Re-transcribe"
+          >
+            {transcribing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+          </Button>
+        </div>
+      </div>
+      <p className="text-sm leading-relaxed whitespace-pre-wrap bg-muted/50 rounded p-2">{transcription.text || <span className="text-muted-foreground italic">No speech detected</span>}</p>
+    </div>
+  );
+}
+
 export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -193,6 +271,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     record_chunk_minutes: 0,
     client_record_max_minutes: 30,
     server_playback: null,
+    vox: { active: false, state: "idle", currentLevel: -96, threshold: -30, recordingDuration: 0, recordingFilename: null, silenceRemaining: 0, config: { threshold: -30, triggerMs: 500, preBufferSecs: 5, postSilenceSecs: 10 } },
   });
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [recordLoading, setRecordLoading] = useState(false);
@@ -202,6 +281,8 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState("");
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
+  const [transcriptions, setTranscriptions] = useState<Record<string, { text: string; language: string } | null>>({});
+  const [transcribingFiles, setTranscribingFiles] = useState<Set<string>>(new Set());
   const serverPlaybackPending = useRef(false);
   const [cardMixers, setCardMixers] = useState<CardMixerState[] | null>(null);
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null);
@@ -260,6 +341,11 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const clientRecordContextRef = useRef<AudioContext | null>(null);
   const clientRecordAnalyserRef = useRef<AnalyserNode | null>(null);
 
+  // VOX state
+  const [voxLoading, setVoxLoading] = useState(false);
+  const [voxConfigOpen, setVoxConfigOpen] = useState(false);
+  const [voxConfig, setVoxConfig] = useState({ threshold: -30, triggerMs: 500, preBufferSecs: 5, postSilenceSecs: 10 });
+
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/status");
@@ -267,6 +353,10 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
         const data = await res.json();
         setStatus(data);
         setStatusLoaded(true);
+        // Sync VOX config from server
+        if (data.vox?.config) {
+          setVoxConfig(data.vox.config);
+        }
         // Sync optimistic server playback state with actual status
         // Don't clear while a request is in flight (race with status poll)
         if (!serverPlaybackPending.current) {
@@ -283,7 +373,19 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const fetchRecordings = useCallback(async () => {
     try {
       const res = await fetch("/api/recordings");
-      if (res.ok) setRecordings(await res.json());
+      if (res.ok) {
+        const recs: Recording[] = await res.json();
+        setRecordings(recs);
+        // Mark in-progress transcriptions so we poll them
+        const inProgress = recs.filter((r) => r.transcriptionStatus === "pending" || r.transcriptionStatus === "processing");
+        if (inProgress.length > 0) {
+          setTranscribingFiles((prev) => {
+            const s = new Set(prev);
+            inProgress.forEach((r) => s.add(r.filename));
+            return s;
+          });
+        }
+      }
     } catch {
       // ignore
     }
@@ -333,6 +435,32 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
       clearInterval(mixerInterval);
     };
   }, [fetchStatus, fetchRecordings, fetchAllMixers, fetchDevices, fetchPlaybackDevices]);
+
+  // Poll in-progress transcriptions
+  useEffect(() => {
+    if (transcribingFiles.size === 0) return;
+    const interval = setInterval(async () => {
+      for (const filename of transcribingFiles) {
+        try {
+          const res = await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription`);
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (data.status === "done" && data.transcription) {
+            setTranscriptions((prev) => ({ ...prev, [filename]: { text: data.transcription, language: data.language } }));
+            setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
+            // Update recording status in the list
+            setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "done" as const } : r) ?? null);
+          } else if (data.status === "error") {
+            setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
+            setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "error" as const } : r) ?? null);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [transcribingFiles]);
 
   // Recording elapsed timer — use recording_started from the status API (DB createdAt)
   // so the timer survives page refreshes. Falls back to Date.now() if not yet available.
@@ -578,6 +706,34 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
       toast.success(wasRecording ? "Recording stopped" : "Recording started");
     } finally {
       setRecordLoading(false);
+    }
+  }
+
+  async function toggleVox() {
+    setVoxLoading(true);
+    try {
+      const endpoint = status.vox.active ? "/api/vox/stop" : "/api/vox/start";
+      await fetch(endpoint, { method: "POST" });
+      await fetchStatus();
+      await fetchRecordings();
+      toast.success(status.vox.active ? "VOX stopped" : "VOX started");
+    } finally {
+      setVoxLoading(false);
+    }
+  }
+
+  async function saveVoxConfig(updates: Partial<typeof voxConfig>) {
+    const updated = { ...voxConfig, ...updates };
+    setVoxConfig(updated);
+    try {
+      await fetch("/api/vox/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      });
+    } catch {
+      // Revert on failure
+      toast.error("Failed to save VOX config");
     }
   }
 
@@ -991,6 +1147,37 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     setPlayingFile(filename);
   }
 
+  async function fetchTranscription(filename: string) {
+    try {
+      const res = await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.status === "done" && data.transcription) {
+        setTranscriptions((prev) => ({ ...prev, [filename]: { text: data.transcription, language: data.language } }));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  async function triggerTranscription(filename: string) {
+    setTranscribingFiles((prev) => new Set(prev).add(filename));
+    try {
+      const res = await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to start transcription");
+        setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
+        return;
+      }
+      // Poll for result
+      setTimeout(() => fetchTranscription(filename), 3000);
+    } catch {
+      toast.error("Failed to start transcription");
+      setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
+    }
+  }
+
   async function startServerPlayback(filename: string) {
     serverPlaybackPending.current = true;
     setServerPlayingFile(filename);
@@ -1361,8 +1548,17 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                               ))}
                             </SelectContent>
                           </Select>
-                          <p className="text-sm font-medium pt-2">Auto-split</p>
-                          <p className="text-xs text-muted-foreground">Split into consecutive files at this interval</p>
+                          <div className="flex items-center gap-1 pt-2">
+                            <p className="text-sm font-medium">Auto-split</p>
+                            <Tooltip>
+                              <TooltipTrigger aria-label="What is auto-split?" className="inline-flex p-0.5" onPointerDown={(e) => e.preventDefault()} onClick={(e) => e.preventDefault()}>
+                                <CircleHelp className="h-3.5 w-3.5 text-muted-foreground/60" />
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs max-w-52" onPointerDownOutside={(e) => e.preventDefault()}>
+                                Split into consecutive files at this interval
+                              </TooltipContent>
+                            </Tooltip>
+                          </div>
                           <Select
                             value={String(status.record_chunk_minutes)}
                             onValueChange={setChunkMinutes}
@@ -1443,7 +1639,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               ) : (
                 <Button
                   onClick={toggleRecord}
-                  disabled={!statusLoaded || recordLoading || toneLoading}
+                  disabled={!statusLoaded || recordLoading || toneLoading || status.vox.active}
                   className="w-full gap-1"
                 >
                   {recordLoading ? (
@@ -1494,6 +1690,153 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                   </div>
                 </>
               )}
+
+              {/* VOX — Sound-activated recording */}
+              <div className="border-t pt-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <Label htmlFor="vox-toggle" className="text-sm font-medium cursor-pointer">VOX</Label>
+                      <Tooltip>
+                        <TooltipTrigger aria-label="What is VOX?" className="inline-flex p-0.5" onPointerDown={(e) => e.preventDefault()} onClick={(e) => e.preventDefault()}>
+                          <CircleHelp className="h-3.5 w-3.5 text-muted-foreground/60" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-xs max-w-52" onPointerDownOutside={(e) => e.preventDefault()}>
+                          Voice-operated switch — automatically starts and stops recording when sound is detected
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    {status.vox.active && (
+                      <Badge
+                        variant={status.vox.state === "recording" || status.vox.state === "tail_silence" ? "default" : "secondary"}
+                        className={`text-[10px] ${status.vox.state === "recording" ? "bg-red-600 hover:bg-red-600 text-white animate-pulse" : status.vox.state === "tail_silence" ? "bg-amber-600 hover:bg-amber-600 text-white" : ""}`}
+                      >
+                        {status.vox.state === "monitoring" ? "Monitoring" : status.vox.state === "recording" ? "Recording" : status.vox.state === "tail_silence" ? `Silence ${formatDuration(status.vox.silenceRemaining)}` : status.vox.state === "finalizing" ? "Saving..." : ""}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Popover open={voxConfigOpen} onOpenChange={setVoxConfigOpen}>
+                      <PopoverTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="VOX settings">
+                          <Cog className="h-3.5 w-3.5" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-72 space-y-3" align="end">
+                        <p className="text-sm font-medium">VOX Settings</p>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span>Threshold</span>
+                            <span className="font-mono text-muted-foreground">{voxConfig.threshold} dB</span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground -mt-1">Minimum sound level to start recording</p>
+                          <Slider
+                            value={[voxConfig.threshold]}
+                            min={-60}
+                            max={-10}
+                            step={1}
+                            onValueCommit={([v]) => saveVoxConfig({ threshold: v })}
+                            onValueChange={([v]) => setVoxConfig((c) => ({ ...c, threshold: v }))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1">
+                              <span>Trigger duration</span>
+                              <Tooltip>
+                                <TooltipTrigger aria-label="What is trigger duration?" className="inline-flex p-0.5" onPointerDown={(e) => e.preventDefault()} onClick={(e) => e.preventDefault()}>
+                                  <CircleHelp className="h-3 w-3 text-muted-foreground/60" />
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="text-xs max-w-52" onPointerDownOutside={(e) => e.preventDefault()}>
+                                  Sound must stay above threshold for this long to avoid false triggers from brief noises
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                            <span className="font-mono text-muted-foreground">{voxConfig.triggerMs} ms</span>
+                          </div>
+                          <Slider
+                            value={[voxConfig.triggerMs]}
+                            min={100}
+                            max={2000}
+                            step={100}
+                            onValueCommit={([v]) => saveVoxConfig({ triggerMs: v })}
+                            onValueChange={([v]) => setVoxConfig((c) => ({ ...c, triggerMs: v }))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span>Pre-buffer</span>
+                            <span className="font-mono text-muted-foreground">{voxConfig.preBufferSecs}s</span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground -mt-1">Audio kept from before the trigger</p>
+                          <Slider
+                            value={[voxConfig.preBufferSecs]}
+                            min={1}
+                            max={30}
+                            step={1}
+                            onValueCommit={([v]) => saveVoxConfig({ preBufferSecs: v })}
+                            onValueChange={([v]) => setVoxConfig((c) => ({ ...c, preBufferSecs: v }))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span>Post-silence</span>
+                            <span className="font-mono text-muted-foreground">{voxConfig.postSilenceSecs}s</span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground -mt-1">Silence duration before saving</p>
+                          <Slider
+                            value={[voxConfig.postSilenceSecs]}
+                            min={3}
+                            max={60}
+                            step={1}
+                            onValueCommit={([v]) => saveVoxConfig({ postSilenceSecs: v })}
+                            onValueChange={([v]) => setVoxConfig((c) => ({ ...c, postSilenceSecs: v }))}
+                          />
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    <Switch
+                      id="vox-toggle"
+                      checked={status.vox.active}
+                      disabled={voxLoading || status.recording}
+                      onCheckedChange={toggleVox}
+                    />
+                  </div>
+                </div>
+                {status.vox.active && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-150 rounded-full ${status.vox.state === "recording" || status.vox.state === "tail_silence" ? "bg-red-500" : "bg-green-500"}`}
+                          style={{ width: `${Math.max(0, Math.min(100, ((status.vox.currentLevel + 60) / 50) * 100))}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-muted-foreground w-12 text-right tabular-nums">
+                        {status.vox.currentLevel > -90 ? `${status.vox.currentLevel} dB` : "-∞ dB"}
+                      </span>
+                    </div>
+                    {/* Threshold marker */}
+                    <div className="relative h-0.5">
+                      <div
+                        className="absolute top-0 w-px h-2 bg-foreground/40 -translate-y-3"
+                        style={{ left: `${Math.max(0, Math.min(100, ((voxConfig.threshold + 60) / 50) * 100))}%` }}
+                        title={`Threshold: ${voxConfig.threshold} dB`}
+                      />
+                    </div>
+                    {(status.vox.state === "recording" || status.vox.state === "tail_silence") && (
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        {status.vox.recordingFilename && (
+                          <span className="font-mono truncate">{status.vox.recordingFilename}</span>
+                        )}
+                        <span className="font-mono tabular-nums ml-auto">
+                          {formatDuration(status.vox.recordingDuration)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -2298,6 +2641,19 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                                   <span className="font-mono truncate">{rec.filename}</span>
                                 )}
                               </span>
+                              {(rec.transcriptionStatus === "pending" || rec.transcriptionStatus === "processing" || transcribingFiles.has(rec.filename)) && (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground shrink-0" aria-label="Transcribing" />
+                              )}
+                              {rec.transcriptionStatus === "done" && !transcribingFiles.has(rec.filename) && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button type="button" className="inline-flex shrink-0" aria-label="Transcription available">
+                                      <FileText className="h-3.5 w-3.5 text-blue-400" aria-hidden="true" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" className="text-xs max-w-xs">Transcription available</TooltipContent>
+                                </Tooltip>
+                              )}
                               {rec.metadata?.effects && (
                                 <Tooltip>
                                   <TooltipTrigger asChild>
@@ -2332,6 +2688,11 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                               >
                                 <Pencil className="h-3 w-3" />
                               </Button>
+                              {rec.metadata?.source === "vox" && (
+                                <Badge variant="outline" className="text-[10px] shrink-0">
+                                  VOX
+                                </Badge>
+                              )}
                               {isActive && (
                                 <Badge variant="secondary" className="bg-red-600 hover:bg-red-600 text-white text-xs animate-pulse shrink-0">
                                   <Circle className="mr-1 h-2 w-2 fill-current" aria-hidden="true" /> REC
@@ -2379,6 +2740,30 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                               <X className="h-4 w-4" aria-hidden="true" />
                             ) : (
                               <Play className="h-4 w-4" aria-hidden="true" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-9 w-9"
+                            onClick={() => {
+                              if (rec.transcriptionStatus === "done" && !transcribingFiles.has(rec.filename)) {
+                                // Toggle showing transcription by toggling player open
+                                if (playingFile !== rec.filename) playRecording(rec.filename);
+                                // Fetch transcription text if not already loaded
+                                if (!transcriptions[rec.filename]) fetchTranscription(rec.filename);
+                              } else if (!transcribingFiles.has(rec.filename)) {
+                                triggerTranscription(rec.filename);
+                              }
+                            }}
+                            disabled={isActive || transcribingFiles.has(rec.filename)}
+                            aria-label={rec.transcriptionStatus === "done" ? "Show transcription" : "Transcribe"}
+                            title={rec.transcriptionStatus === "done" ? "Show transcription" : "Transcribe"}
+                          >
+                            {transcribingFiles.has(rec.filename) ? (
+                              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                            ) : (
+                              <Languages className="h-4 w-4" aria-hidden="true" />
                             )}
                           </Button>
                           {isActive ? (
@@ -2453,11 +2838,28 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                     </TableRow>
                     {isPlaying && (
                       <TableRow className="bg-muted/50">
-                        <TableCell colSpan={6} className="p-3">
+                        <TableCell colSpan={6} className="p-3 space-y-3">
                           <WaveformPlayer
                             src={`/api/recordings/${encodeURIComponent(rec.filename)}`}
                             waveformUrl={`/api/recordings/${encodeURIComponent(rec.filename)}/waveform${rec.waveformHash ? `?v=${rec.waveformHash}` : ""}`}
                           />
+                          {rec.transcriptionStatus === "done" && (
+                            <TranscriptionPanel
+                              filename={rec.filename}
+                              transcription={transcriptions[rec.filename] ?? null}
+                              onLoad={() => { if (!transcriptions[rec.filename]) fetchTranscription(rec.filename); }}
+                              onRetranscribe={() => triggerTranscription(rec.filename)}
+                              transcribing={transcribingFiles.has(rec.filename)}
+                            />
+                          )}
+                          {(rec.transcriptionStatus === "error") && (
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <span>Transcription failed</span>
+                              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => triggerTranscription(rec.filename)}>
+                                <RotateCcw className="h-3 w-3 mr-1" /> Retry
+                              </Button>
+                            </div>
+                          )}
                         </TableCell>
                       </TableRow>
                     )}

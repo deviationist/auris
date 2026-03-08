@@ -39,6 +39,7 @@ export async function GET() {
           device: row.device,
           metadata: row.metadata ? JSON.parse(row.metadata) : null,
           waveformHash: row.waveformHash ?? null,
+          transcriptionStatus: row.transcriptionStatus ?? null,
         };
       })
     );

@@ -9,6 +9,7 @@ import { randomBytes } from "crypto";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
 import { generateWaveform, hashWaveform } from "@/lib/waveform";
+import { generateTranscription, enqueueTranscription } from "@/lib/transcription";
 import { buildFilterChain, DEFAULT_EFFECTS, type TalkbackEffects } from "@/lib/talkback-effects";
 
 const execFileAsync = promisify(execFile);
@@ -143,6 +144,16 @@ export async function POST(req: NextRequest) {
           .where(eq(recordings.filename, filename));
       })
       .catch(() => {});
+    // Fire-and-forget transcription (queued, serial)
+    enqueueTranscription(async () => {
+      const { eq } = await import("drizzle-orm");
+      await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, filename));
+      const { text, language } = await generateTranscription(mp3Path);
+      await db.update(recordings).set({ transcription: text, transcriptionLang: language, transcriptionStatus: "done" }).where(eq(recordings.filename, filename));
+    }).catch(async () => {
+      const { eq } = await import("drizzle-orm");
+      await db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, filename)).catch(() => {});
+    });
 
     return NextResponse.json({ ok: true, filename });
   } catch (error) {

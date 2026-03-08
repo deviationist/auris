@@ -1,5 +1,6 @@
 import { setCaptureMode, getCaptureMode, getRecordStartedAt, setRecordStartedAt, getRecordChunkMinutes, getRecordChunkPart, setRecordChunkPart } from "@/lib/device-config";
 import { isActive, startUnit, stopUnit } from "@/lib/systemctl";
+import { isVoxActive, stopVox } from "@/lib/vox";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -8,6 +9,7 @@ import { join } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { generateWaveform, hashWaveform } from "@/lib/waveform";
+import { generateTranscription, enqueueTranscription } from "@/lib/transcription";
 import { scheduleChunk, cancelChunk } from "@/lib/record-chunker";
 
 const execFileAsync = promisify(execFile);
@@ -52,6 +54,11 @@ async function findActiveFile(startedAt: number): Promise<string | null> {
 }
 
 export async function startRecording(chunkPart?: number): Promise<void> {
+  // Stop VOX if active (they share the ALSA device)
+  if (isVoxActive()) {
+    await stopVox();
+  }
+
   const startedAt = Date.now();
   const chunkMinutes = await getRecordChunkMinutes();
 
@@ -120,6 +127,14 @@ export async function stopRecording(): Promise<number> {
               .where(eq(recordings.filename, activeFile));
           })
           .catch(() => {});
+        // Fire-and-forget transcription (queued, serial)
+        enqueueTranscription(async () => {
+          await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, activeFile));
+          const { text, language } = await generateTranscription(filePath);
+          await db.update(recordings).set({ transcription: text, transcriptionLang: language, transcriptionStatus: "done" }).where(eq(recordings.filename, activeFile));
+        }).catch(() => {
+          db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, activeFile)).catch(() => {});
+        });
       } catch {
         // ignore metadata update failure
       }

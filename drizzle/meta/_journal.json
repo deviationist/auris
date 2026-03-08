@@ -29,6 +29,13 @@
       "when": 1772877487766,
       "tag": "0003_jittery_magik",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1772998827944,
+      "tag": "0004_fixed_vision",
+      "breakpoints": true
     }
   ]
 }

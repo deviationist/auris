@@ -183,3 +183,42 @@ export async function getClientRecordMaxMinutes(): Promise<number> {
   const val = parseInt(config.CLIENT_RECORD_MAX_MINUTES, 10);
   return isNaN(val) || val <= 0 ? 30 : val;
 }
+
+export async function getWhisperLanguage(): Promise<string> {
+  const config = await readConfig();
+  return config.WHISPER_LANGUAGE || "auto";
+}
+
+export async function setWhisperLanguage(lang: string): Promise<void> {
+  const config = await readConfig();
+  config.WHISPER_LANGUAGE = lang;
+  await writeConfig(config);
+}
+
+// --- VOX config ---
+
+export interface VoxConfig {
+  threshold: number;      // dB, default -30
+  triggerMs: number;       // ms level must exceed threshold before recording, default 500
+  preBufferSecs: number;   // seconds of pre-trigger audio to keep, default 5
+  postSilenceSecs: number; // seconds of silence before stopping, default 10
+}
+
+export async function getVoxConfig(): Promise<VoxConfig> {
+  const config = await readConfig();
+  return {
+    threshold: parseFloat(config.VOX_THRESHOLD) || -30,
+    triggerMs: parseInt(config.VOX_TRIGGER_MS, 10) || 500,
+    preBufferSecs: parseInt(config.VOX_PRE_BUFFER_SECS, 10) || 5,
+    postSilenceSecs: parseInt(config.VOX_POST_SILENCE_SECS, 10) || 10,
+  };
+}
+
+export async function setVoxConfig(vox: Partial<VoxConfig>): Promise<void> {
+  const config = await readConfig();
+  if (vox.threshold !== undefined) config.VOX_THRESHOLD = String(vox.threshold);
+  if (vox.triggerMs !== undefined) config.VOX_TRIGGER_MS = String(vox.triggerMs);
+  if (vox.preBufferSecs !== undefined) config.VOX_PRE_BUFFER_SECS = String(vox.preBufferSecs);
+  if (vox.postSilenceSecs !== undefined) config.VOX_POST_SILENCE_SECS = String(vox.postSilenceSecs);
+  await writeConfig(config);
+}

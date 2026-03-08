@@ -6,6 +6,9 @@ import type { Duplex } from "stream";
 import { handleTalkbackSocket, isTalkbackActive, onTalkbackStart } from "./src/lib/talkback.js";
 import { setTalkbackActiveCheck, stopPlayback } from "./src/lib/server-playback.js";
 import { isAuthEnabled } from "./src/lib/auth-config.js";
+import { startIdleCheck } from "./src/lib/stream-idle.js";
+// VOX engine import — ensures globalThis singleton is initialized for API routes
+import "./src/lib/vox.js";
 import { decode } from "next-auth/jwt";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -70,5 +73,6 @@ app.prepare().then(() => {
 
   server.listen(port, () => {
     console.log(`> Ready on http://localhost:${port}`);
+    startIdleCheck();
   });
 });
