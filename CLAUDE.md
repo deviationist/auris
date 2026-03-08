@@ -108,7 +108,7 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - `LevelMeter` component supports two modes: `audioElement`+`audioContext` (monitor/playback) or direct `analyserNode` (talkback/client recording)
 - Auth is optional: omit `AUTH_USERNAME`/`AUTH_PASSWORD_HASH` to disable. `src/proxy.ts` checks `isAuthEnabled()` and skips auth when unconfigured.
 - WebSocket talkback in `server.ts` validates the `authjs.session-token` JWT cookie when auth is enabled
-- `.env.local` — `AUTH_SECRET` (required when auth enabled), `AUTH_TRUST_HOST=true`
+- `.env.local` — `AUTH_SECRET` (required when auth enabled), `AUTH_TRUST_HOST=true`, `NEXTAUTH_URL` (required behind reverse proxy, e.g. `https://your-hostname.example.com`)
 - Sudoers at `system/auris-sudoers` — uses `%%USER%%` placeholder, substituted by `setup.sh`
 - Icecast passwords use `%%PLACEHOLDER%%` tokens in `system/icecast.xml`, substituted by `setup.sh` with random values
 - DB path: `DATABASE_PATH` env var or `./data/auris.db` (must be local filesystem, not CIFS/NFS)

@@ -6,40 +6,47 @@ import bcrypt from "bcryptjs";
 
 const CONFIG_PATH = "/etc/default/auris";
 
-// Queue-based readline that doesn't drop buffered lines between awaits
-function createPrompter() {
+function ask(query) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const lineQueue = [];
-  let lineWaiter = null;
-
-  rl.on("line", (line) => {
-    if (lineWaiter) {
-      const resolve = lineWaiter;
-      lineWaiter = null;
-      resolve(line);
-    } else {
-      lineQueue.push(line);
-    }
-  });
-
-  rl.on("close", () => {
-    if (lineWaiter) {
-      lineWaiter("");
-      lineWaiter = null;
-    }
-  });
-
-  function ask(query) {
-    process.stdout.write(query);
-    if (lineQueue.length > 0) {
-      return Promise.resolve(lineQueue.shift());
-    }
-    return new Promise((resolve) => {
-      lineWaiter = resolve;
+  return new Promise((resolve) => {
+    rl.question(query, (answer) => {
+      rl.close();
+      resolve(answer);
     });
-  }
+  });
+}
 
-  return { ask, close: () => rl.close() };
+function askSecret(query) {
+  if (!process.stdin.isTTY) {
+    return ask(query);
+  }
+  return new Promise((resolve) => {
+    process.stdout.write(query);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+    let input = "";
+    const onData = (ch) => {
+      if (ch === "\n" || ch === "\r" || ch === "\u0004") {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener("data", onData);
+        process.stdout.write("\n");
+        resolve(input);
+      } else if (ch === "\u0003") {
+        process.stdin.setRawMode(false);
+        process.stdout.write("\n");
+        process.exit(1);
+      } else if (ch === "\u007f" || ch === "\b") {
+        if (input.length > 0) {
+          input = input.slice(0, -1);
+        }
+      } else {
+        input += ch;
+      }
+    };
+    process.stdin.on("data", onData);
+  });
 }
 
 function updateConfig(config, updates) {
@@ -70,39 +77,34 @@ async function main() {
   const currentUser = config.match(/^AUTH_USERNAME=(.*)$/m)?.[1];
   const defaultUser = currentUser || "admin";
 
-  const { ask, close } = createPrompter();
+  const username =
+    (await ask(`Username [${defaultUser}]: `)) || defaultUser;
+  const password = await askSecret("Password (empty = disable auth): ");
 
-  try {
-    const username =
-      (await ask(`Username [${defaultUser}]: `)) || defaultUser;
-    const password = await ask("Password (empty = disable auth): ");
-
-    if (!password) {
-      writeConfig(
-        updateConfig(config, { AUTH_USERNAME: null, AUTH_PASSWORD_HASH: null })
-      );
-      console.log(
-        "Auth disabled. Restart the app for changes to take effect."
-      );
-      return;
-    }
-
-    const confirm = await ask("Confirm password: ");
-    if (password !== confirm) {
-      console.error("Passwords do not match.");
-      process.exit(1);
-    }
-
-    const hash = await bcrypt.hash(password, 10);
+  if (!password) {
     writeConfig(
-      updateConfig(config, { AUTH_USERNAME: username, AUTH_PASSWORD_HASH: `'${hash}'` })
+      updateConfig(config, { AUTH_USERNAME: null, AUTH_PASSWORD_HASH: null })
     );
     console.log(
-      `Auth set for "${username}". Restart the app for changes to take effect.`
+      "Auth disabled. Restart the app for changes to take effect."
     );
-  } finally {
-    close();
+    process.exit(0);
   }
+
+  const confirm = await askSecret("Confirm password: ");
+  if (password !== confirm) {
+    console.error("Passwords do not match.");
+    process.exit(1);
+  }
+
+  const hash = await bcrypt.hash(password, 10);
+  writeConfig(
+    updateConfig(config, { AUTH_USERNAME: username, AUTH_PASSWORD_HASH: `'${hash}'` })
+  );
+  console.log(
+    `Auth set for "${username}". Restart the app for changes to take effect.`
+  );
+  process.exit(0);
 }
 
 main();
