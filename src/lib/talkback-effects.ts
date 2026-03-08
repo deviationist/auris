@@ -46,9 +46,19 @@ export const AUTOTUNE_KEYS = Object.keys(SCALE_NOTES);
 export function buildFilterChain(effects: TalkbackEffects): string[] {
   const filters: string[] = [];
 
-  if (effects.pitchShift.enabled && effects.pitchShift.semitones !== 0) {
-    const pitch = Math.pow(2, effects.pitchShift.semitones / 12);
-    filters.push(`rubberband=pitch=${pitch.toFixed(4)}`);
+  // Combine pitch shift and tempo into a single rubberband filter (real-time capable)
+  const hasPitch = effects.pitchShift.enabled && effects.pitchShift.semitones !== 0;
+  const hasTempo = effects.tempo.enabled && effects.tempo.factor !== 1.0;
+  if (hasPitch || hasTempo) {
+    const params: string[] = [];
+    if (hasPitch) {
+      const pitch = Math.pow(2, effects.pitchShift.semitones / 12);
+      params.push(`pitch=${pitch.toFixed(4)}`);
+    }
+    if (hasTempo) {
+      params.push(`tempo=${effects.tempo.factor.toFixed(2)}`);
+    }
+    filters.push(`rubberband=${params.join(":")}`);
   }
 
   if (effects.echo.enabled) {
@@ -73,10 +83,6 @@ export function buildFilterChain(effects: TalkbackEffects): string[] {
     filters.push(
       `vibrato=f=${effects.vibrato.frequency.toFixed(1)}:d=${effects.vibrato.depth.toFixed(2)}`
     );
-  }
-
-  if (effects.tempo.enabled && effects.tempo.factor !== 1.0) {
-    filters.push(`atempo=${effects.tempo.factor.toFixed(2)}`);
   }
 
   if (effects.autotune.enabled) {

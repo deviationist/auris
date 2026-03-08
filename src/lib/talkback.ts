@@ -1,18 +1,35 @@
 import { spawn, type ChildProcess } from "child_process";
 import type { WebSocket } from "ws";
 import type { ParsedUrlQuery } from "querystring";
-import { getPlaybackDevice } from "./device-config.js";
-import { buildFilterChain, DEFAULT_EFFECTS, type TalkbackEffects } from "./talkback-effects.js";
+import { getPlaybackDevice } from "@/lib/device-config";
+import { buildFilterChain, DEFAULT_EFFECTS, type TalkbackEffects } from "@/lib/talkback-effects";
 
-let activeSession: { ws: WebSocket; ffmpeg: ChildProcess } | null = null;
-let onTalkbackStartCallback: (() => void) | null = null;
+// Use globalThis to survive HMR module reloads in dev and share state with API routes
+const g = globalThis as typeof globalThis & {
+  __talkbackSession?: { ws: WebSocket; ffmpeg: ChildProcess } | null;
+  __talkbackStartCallback?: (() => void) | null;
+};
+
+function getSession() { return g.__talkbackSession ?? null; }
+function setSession(v: { ws: WebSocket; ffmpeg: ChildProcess } | null) { g.__talkbackSession = v; }
 
 export function isTalkbackActive(): boolean {
-  return activeSession !== null;
+  return getSession() !== null;
+}
+
+export function forceStopTalkback(): boolean {
+  const session = getSession();
+  if (!session) return false;
+  console.log("[talkback] force stop requested");
+  setSession(null);
+  session.ffmpeg.stdin?.destroy();
+  session.ffmpeg.kill("SIGKILL");
+  try { session.ws.close(4000, "Force stopped"); } catch { /* ignore */ }
+  return true;
 }
 
 export function onTalkbackStart(cb: () => void) {
-  onTalkbackStartCallback = cb;
+  g.__talkbackStartCallback = cb;
 }
 
 function parseEffects(query: ParsedUrlQuery): TalkbackEffects {
@@ -27,7 +44,7 @@ function parseEffects(query: ParsedUrlQuery): TalkbackEffects {
 }
 
 export function handleTalkbackSocket(ws: WebSocket, query: ParsedUrlQuery = {}) {
-  if (activeSession) {
+  if (getSession()) {
     console.log("[talkback] rejected — already in use");
     ws.close(4409, "Talkback already in use");
     return;
@@ -42,10 +59,10 @@ export function handleTalkbackSocket(ws: WebSocket, query: ParsedUrlQuery = {}) 
     if (closed) return;
     closed = true;
     console.log(`[talkback] cleanup — received ${messageCount} messages, ${bytesReceived} bytes`);
-    if (activeSession?.ws === ws) activeSession = null;
+    if (getSession()?.ws === ws) setSession(null);
     if (ffmpeg) {
-      ffmpeg.stdin?.end();
-      ffmpeg.kill("SIGTERM");
+      ffmpeg.stdin?.destroy();
+      ffmpeg.kill("SIGKILL");
       ffmpeg = null;
     }
   }
@@ -55,7 +72,7 @@ export function handleTalkbackSocket(ws: WebSocket, query: ParsedUrlQuery = {}) 
       if (closed) return;
 
       // Talkback takes priority — notify listeners (e.g. server playback)
-      onTalkbackStartCallback?.();
+      g.__talkbackStartCallback?.();
 
       const effects = parseEffects(query);
       const filters = buildFilterChain(effects);
@@ -87,7 +104,7 @@ export function handleTalkbackSocket(ws: WebSocket, query: ParsedUrlQuery = {}) 
         cleanup();
       });
 
-      activeSession = { ws, ffmpeg };
+      setSession({ ws, ffmpeg });
 
       ws.on("message", (data: Buffer) => {
         messageCount++;

@@ -236,7 +236,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const talkbackEffectsRef = useRef(talkbackEffects);
   talkbackEffectsRef.current = talkbackEffects;
   const [talkbackActive, setTalkbackActive] = useState(false);
-  const [talkbackLevel, setTalkbackLevel] = useState(0);
+
   const [talkbackRejected, setTalkbackRejected] = useState(false);
   const [playbackState, setPlaybackState] = useState<PlaybackState | null>(null);
   const talkbackWsRef = useRef<WebSocket | null>(null);
@@ -244,7 +244,8 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const talkbackContextRef = useRef<AudioContext | null>(null);
   const talkbackWorkletRef = useRef<AudioWorkletNode | null>(null);
   const talkbackAnalyserRef = useRef<AnalyserNode | null>(null);
-  const talkbackRafRef = useRef<number>(0);
+
+  const talkbackAbortRef = useRef(false);
 
   // Client recording state
   const [clientRecording, setClientRecording] = useState(false);
@@ -255,6 +256,8 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const clientChunksRef = useRef<Blob[]>([]);
   const clientRecordStartRef = useRef<number>(0);
   const clientRecordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const clientRecordContextRef = useRef<AudioContext | null>(null);
+  const clientRecordAnalyserRef = useRef<AnalyserNode | null>(null);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -387,6 +390,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   // Keyboard shortcuts: R = toggle recording, L = toggle listening, T = test tone
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (e.repeat) return; // Ignore held-down key repeat
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
@@ -719,11 +723,23 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   }
 
   async function startTalkback() {
+    // Guard against repeated calls (key repeat fires before talkbackActive is set)
+    if (talkbackWsRef.current || talkbackStreamRef.current) return;
+
     setTalkbackRejected(false);
+    setTalkbackActive(true); // Set immediately to block repeated keydown calls
+    talkbackAbortRef.current = false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 48000 },
       });
+
+      // Check if stop was requested while awaiting getUserMedia
+      if (talkbackAbortRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        setTalkbackActive(false);
+        return;
+      }
       talkbackStreamRef.current = stream;
 
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -743,27 +759,21 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
       ws.onerror = () => stopTalkback();
 
       ws.onopen = async () => {
+        // Check if stop was requested while WebSocket was connecting
+        if (talkbackAbortRef.current) {
+          ws.close();
+          return;
+        }
+
         const ctx = new AudioContext({ sampleRate: 48000 });
         talkbackContextRef.current = ctx;
         const source = ctx.createMediaStreamSource(stream);
 
-        // Analyser for level meter
+        // Analyser for level meter (rendered by LevelMeter component)
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 256;
         source.connect(analyser);
         talkbackAnalyserRef.current = analyser;
-
-        // Start level metering
-        const dataArray = new Float32Array(analyser.fftSize);
-        function updateLevel() {
-          analyser.getFloatTimeDomainData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i] * dataArray[i];
-          const rms = Math.sqrt(sum / dataArray.length);
-          setTalkbackLevel(Math.min(1, rms * 5));
-          talkbackRafRef.current = requestAnimationFrame(updateLevel);
-        }
-        updateLevel();
 
         // AudioWorklet for PCM capture
         await ctx.audioWorklet.addModule("/talkback-processor.js");
@@ -775,8 +785,6 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
         };
         source.connect(worklet);
         talkbackWorkletRef.current = worklet;
-
-        setTalkbackActive(true);
       };
     } catch (err) {
       const msg = err instanceof DOMException
@@ -792,9 +800,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   }
 
   function stopTalkback() {
-    cancelAnimationFrame(talkbackRafRef.current);
-    talkbackRafRef.current = 0;
-
+    talkbackAbortRef.current = true; // Signal any in-flight startTalkback to bail out
     talkbackWorkletRef.current?.disconnect();
     talkbackWorkletRef.current = null;
 
@@ -808,13 +814,13 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
     talkbackStreamRef.current?.getTracks().forEach((t) => t.stop());
     talkbackStreamRef.current = null;
 
-    if (talkbackWsRef.current?.readyState === WebSocket.OPEN) {
-      talkbackWsRef.current.close();
-    }
+    const ws = talkbackWsRef.current;
     talkbackWsRef.current = null;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      ws.close();
+    }
 
     setTalkbackActive(false);
-    setTalkbackLevel(0);
   }
 
   async function startClientRecording() {
@@ -869,6 +875,15 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
         }
       };
 
+      // Analyser for level meter
+      const ctx = new AudioContext();
+      clientRecordContextRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      clientRecordAnalyserRef.current = analyser;
+
       recorder.start(1000); // collect data every second
       clientRecordStartRef.current = Date.now();
       setClientRecordElapsed(0);
@@ -902,6 +917,11 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
       clientRecorderRef.current.stop();
     }
     clientRecorderRef.current = null;
+    clientRecordAnalyserRef.current = null;
+    if (clientRecordContextRef.current?.state !== "closed") {
+      clientRecordContextRef.current?.close();
+    }
+    clientRecordContextRef.current = null;
     setClientRecording(false);
     setClientRecordElapsed(0);
   }
@@ -1940,26 +1960,35 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button
-                onMouseDown={() => !talkbackActive && startTalkback()}
-                onMouseUp={() => talkbackActive && stopTalkback()}
-                onMouseLeave={() => talkbackActive && stopTalkback()}
-                onTouchStart={(e) => { e.preventDefault(); if (!talkbackActive) startTalkback(); }}
-                onTouchEnd={() => talkbackActive && stopTalkback()}
-                variant={talkbackActive ? "destructive" : "outline"}
-                className="w-full gap-1 select-none"
-              >
-                <Radio className="mr-2 h-4 w-4" />
-                {talkbackActive ? "Release to Stop" : "Hold to Talk"}
-                <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">K</kbd>
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  onMouseDown={() => !talkbackActive && startTalkback()}
+                  onMouseUp={() => talkbackActive && stopTalkback()}
+                  onMouseLeave={() => talkbackActive && stopTalkback()}
+                  onTouchStart={(e) => { e.preventDefault(); if (!talkbackActive) startTalkback(); }}
+                  onTouchEnd={() => talkbackActive && stopTalkback()}
+                  variant={talkbackActive ? "destructive" : "outline"}
+                  className={`gap-1 select-none ${process.env.NODE_ENV === "development" ? "flex-1" : "w-full"}`}
+                >
+                  <Radio className="mr-2 h-4 w-4" />
+                  {talkbackActive ? "Release to Stop" : "Hold to Talk"}
+                  <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">K</kbd>
+                </Button>
+                {process.env.NODE_ENV === "development" && (
+                  <Button
+                    variant="outline"
+                    className="flex-1 text-xs"
+                    onClick={async () => {
+                      stopTalkback();
+                      await fetch("/api/talkback/stop", { method: "POST" });
+                    }}
+                  >
+                    Force Stop
+                  </Button>
+                )}
+              </div>
               {talkbackActive && (
-                <div className="h-2 rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full bg-orange-500 transition-all duration-75"
-                    style={{ width: `${talkbackLevel * 100}%` }}
-                  />
-                </div>
+                <LevelMeter analyserNode={talkbackAnalyserRef.current} active={talkbackActive} />
               )}
               {talkbackRejected && (
                 <p className="text-xs text-destructive">Talkback is in use by another client.</p>
@@ -1989,6 +2018,9 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                 <Label htmlFor="client-record-btn" className="text-xs text-muted-foreground mt-2">
                   Record from browser mic
                 </Label>
+                {clientRecording && (
+                  <LevelMeter analyserNode={clientRecordAnalyserRef.current} active={clientRecording} />
+                )}
               </div>
             </CardContent>
           </Card>
@@ -2002,7 +2034,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
             aria-expanded={mounted && mixerOpen}
             aria-controls="mixer-panel"
           >
-            <div>
+            <div className="space-y-2">
               <CardTitle className="text-lg" role="heading" aria-level={2}>Mixer</CardTitle>
               <CardDescription>ALSA mixer levels per card</CardDescription>
             </div>
@@ -2063,7 +2095,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
               aria-expanded={mounted && recordingsOpen}
               aria-controls="recordings-panel"
             >
-              <div className="min-w-0">
+              <div className="min-w-0 space-y-2">
                 <CardTitle className="text-lg" role="heading" aria-level={2}>Recordings</CardTitle>
                 <CardDescription>
                   {recordings === null

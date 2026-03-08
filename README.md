@@ -238,6 +238,8 @@ auris/
 │   │       │   └── [filename]/
 │   │       │       ├── route.ts        # GET  — stream file, PATCH — rename, DELETE — remove
 │   │       │       └── waveform/route.ts # GET — waveform peaks data
+│   │       ├── talkback/
+│   │           │   └── stop/route.ts  # POST — force-stop talkback session
 │   │       └── audio/
 │   │           ├── devices/route.ts    # GET  — list ALSA capture devices
 │   │           ├── device/route.ts     # GET/POST — get/set device selections (record, listen, playback)
@@ -250,7 +252,7 @@ auris/
 │   ├── components/
 │   │   ├── ui/                         # shadcn/ui components (do not edit)
 │   │   ├── login-form.tsx              # Login form (client component)
-│   │   ├── level-meter.tsx             # WebAudio RMS/dB level meter
+│   │   ├── level-meter.tsx             # WebAudio RMS/dB level meter (audioElement or analyserNode)
 │   │   ├── live-waveform.tsx           # Real-time waveform visualization
 │   │   ├── waveform-player.tsx         # Canvas waveform player with seek, play/pause
 │   │   ├── card-mixer.tsx              # ALSA mixer card component (capture + playback volume)
@@ -284,6 +286,7 @@ auris/
 ├── stream.sh                           # ffmpeg ALSA → Icecast script
 ├── record.sh                           # ffmpeg Icecast → file script (-c copy)
 ├── drizzle.config.ts                   # Drizzle Kit config
+├── server.ts                           # Custom HTTP/WebSocket server (talkback WS, Next.js)
 ├── ecosystem.config.js                 # PM2 config
 ├── setup.sh                            # Automated setup script
 ├── .env.example                        # Example environment variables

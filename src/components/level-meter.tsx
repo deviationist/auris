@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 
 interface LevelMeterProps {
-  audioElement: HTMLAudioElement | null;
-  audioContext: AudioContext | null;
+  audioElement?: HTMLAudioElement | null;
+  audioContext?: AudioContext | null;
   active: boolean;
   streamUrl?: string | null;
+  analyserNode?: AnalyserNode | null;
 }
 
-export function LevelMeter({ audioElement, audioContext, active, streamUrl }: LevelMeterProps) {
+export function LevelMeter({ audioElement, audioContext, active, streamUrl, analyserNode }: LevelMeterProps) {
   const [displayDb, setDisplayDb] = useState("-∞");
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -231,6 +232,45 @@ export function LevelMeter({ audioElement, audioContext, active, streamUrl }: Le
     };
   }, [active, audioElement, audioContext, streamUrl]);
 
+  // Direct analyser mode (e.g. talkback microphone)
+  useEffect(() => {
+    if (!analyserNode || !active) return;
+    // Skip if audioElement mode is handling things
+    if (audioElement && audioContext) return;
+
+    const dataArray = new Float32Array(analyserNode.fftSize);
+    let lastDisplayUpdate = 0;
+    let raf = 0;
+
+    function tick() {
+      analyserNode!.getFloatTimeDomainData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i] * dataArray[i];
+      const rms = Math.sqrt(sum / dataArray.length);
+      const dB = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+
+      const clamped = Math.max(-60, Math.min(0, dB));
+      dbValueRef.current = clamped;
+      const percent = ((clamped + 60) / 60) * 100;
+      if (barRef.current) {
+        barRef.current.style.width = `${percent}%`;
+        const color = clamped > -3 ? "bg-red-500" : clamped > -12 ? "bg-yellow-500" : "bg-green-500";
+        barRef.current.className = `h-full rounded-full ${color} transition-[width] duration-100 ease-out`;
+      }
+
+      const now = performance.now();
+      if (now - lastDisplayUpdate > 300) {
+        setDisplayDb(dB === -Infinity ? "-∞" : `${dB.toFixed(1)}`);
+        lastDisplayUpdate = now;
+      }
+
+      raf = requestAnimationFrame(tick);
+    }
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [analyserNode, active, audioElement, audioContext]);
+
   return (
     <div className="space-y-1" role="region" aria-label="Audio level meter">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -242,7 +282,7 @@ export function LevelMeter({ audioElement, audioContext, active, streamUrl }: Le
         role="progressbar"
         aria-valuemin={-60}
         aria-valuemax={0}
-        aria-valuenow={dbValueRef.current}
+        aria-valuenow={displayDb === "-∞" ? -60 : parseFloat(displayDb)}
         aria-label="Audio level"
       >
         <div ref={barRef} className="h-full rounded-full bg-green-500 transition-[width] duration-250 ease-out" />
