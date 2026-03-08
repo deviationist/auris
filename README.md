@@ -1,6 +1,6 @@
 # Auris
 
-Remote audio console for monitoring, recording, and two-way communication. Streams live audio via Icecast2, records to disk (server and client), provides push-to-talk intercom with voice effects, and plays recordings through the server speaker — all controlled through a Next.js web UI.
+Remote audio console for monitoring, recording, and two-way communication. Streams live audio via Icecast2, records to disk (server and client), provides push-to-talk intercom with voice effects, VOX (voice-operated recording), offline transcription via whisper.cpp, and plays recordings through the server speaker — all controlled through a Next.js web UI.
 
 ![Auris screenshot](screenshot-v3.jpg)
 
@@ -36,6 +36,12 @@ Toggling recording starts/stops only `auris-record` — the Icecast stream is ne
 Server-side playback uses ffmpeg to decode MP3 recordings directly to the ALSA output device. Talkback and server playback are mutually exclusive — talkback takes priority.
 
 Voice effects (pitch shift, echo, chorus, flanger, vibrato, tempo, autotune) can be applied to both talkback and client recordings. Effects are processed server-side via ffmpeg audio filters. Client recordings store effects metadata in the database for later reference.
+
+VOX (voice-operated switch) monitors the audio input level and automatically starts/stops recording when sound is detected. Configurable threshold, trigger duration (debounce), pre-buffer (captures audio before the trigger), and post-silence (how long to wait before saving). VOX recordings are tagged with `source: "vox"` in metadata.
+
+Transcription uses whisper.cpp for local, offline speech-to-text. Transcriptions run automatically after recordings complete (fire-and-forget) and can also be triggered on-demand from the UI. A serial queue processes one transcription at a time to avoid CPU overload.
+
+Stream idle detection automatically stops `auris-stream` when no Icecast listeners are connected for 60 seconds (only when streaming without recording), saving CPU.
 
 ## Quick setup
 
@@ -199,6 +205,9 @@ npm run db:push                # push schema directly to DB (dev only)
 npm run waveforms:generate     # generate missing waveforms
 npm run waveforms:regenerate   # regenerate all waveforms
 npm run waveforms:clear        # remove all waveforms from DB
+npm run transcriptions:generate    # transcribe recordings missing transcriptions
+npm run transcriptions:regenerate  # re-transcribe all recordings
+npm run transcriptions:clear       # remove all transcriptions from DB
 ```
 
 The API routes will work in dev mode as long as the systemd unit and sudoers are installed.
@@ -234,7 +243,13 @@ auris/
 │   │       │   ├── upload/route.ts     # POST — upload client-recorded audio
 │   │       │   └── [filename]/
 │   │       │       ├── route.ts        # GET  — stream file, PATCH — rename, DELETE — remove
-│   │       │       └── waveform/route.ts # GET — waveform peaks data
+│   │       │       ├── waveform/route.ts # GET — waveform peaks data
+│   │       │       └── transcription/route.ts # GET/POST — transcription text / trigger
+│   │       ├── vox/
+│   │       │   ├── start/route.ts      # POST — start VOX monitoring
+│   │       │   ├── stop/route.ts       # POST — stop VOX monitoring
+│   │       │   └── config/route.ts     # POST — update VOX config
+│   │       ├── transcription/route.ts  # GET  — transcription queue status
 │   │       ├── talkback/
 │   │           │   └── stop/route.ts  # POST — force-stop talkback session
 │   │       └── audio/
@@ -266,11 +281,15 @@ auris/
 │       ├── talkback.ts                 # Talkback audio (browser PCM → ALSA)
 │       ├── talkback-effects.ts         # Voice effects config & ffmpeg filter chain builder
 │       ├── waveform.ts                 # Waveform generation (ffmpeg PCM → peaks)
+│       ├── vox.ts                      # VOX engine (voice-operated recording)
+│       ├── transcription.ts            # Whisper.cpp integration (serial queue)
+│       ├── stream-idle.ts              # Auto-stop idle audio stream
 │       └── db/
 │           ├── schema.ts               # Drizzle schema (recordings: name, metadata, waveform, etc.)
 │           └── index.ts                # DB singleton, migrations, sync
 ├── scripts/
 │   ├── generate-waveforms.mjs          # CLI: generate/clear waveform data in DB
+│   ├── generate-transcriptions.mjs     # CLI: generate/clear transcriptions
 │   └── set-auth.mjs                    # CLI: set/disable auth credentials
 ├── drizzle/                            # Generated DB migrations
 ├── data/                               # SQLite database (auris.db)
@@ -295,7 +314,7 @@ auris/
 | File | What to change |
 |---|---|
 | `/etc/default/auris` | `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH` |
-| `.env.local` | `RECORDINGS_DIR`, `DATABASE_PATH`, `NEXT_PUBLIC_STREAM_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, `NEXTAUTH_URL` (see `.env.example`) |
+| `.env.local` | `RECORDINGS_DIR`, `DATABASE_PATH`, `NEXT_PUBLIC_STREAM_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, `NEXTAUTH_URL`, `WHISPER_BIN`, `WHISPER_MODEL`, `WHISPER_LANGUAGE` (see `.env.example`) |
 | `system/icecast.xml` | Passwords (auto-generated by `setup.sh`), listen address |
 | `system/nginx-auris.conf` | `server_name` hostname (default: `_` catch-all) |
 | `system/auris-sudoers` | Username (`%%USER%%` placeholder, substituted by `setup.sh`) |
