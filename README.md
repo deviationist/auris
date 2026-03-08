@@ -2,7 +2,7 @@
 
 Remote audio console for monitoring, recording, and two-way communication. Streams live audio via Icecast2, records to disk (server and client), provides push-to-talk intercom with voice effects, and plays recordings through the server speaker — all controlled through a Next.js web UI.
 
-![Auris screenshot](screenshot-v2.jpg)
+![Auris screenshot](screenshot-v3.jpg)
 
 ## Architecture
 
