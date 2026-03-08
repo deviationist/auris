@@ -201,6 +201,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   const [serverPlayingFile, setServerPlayingFile] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState("");
+  const [deletingFile, setDeletingFile] = useState<string | null>(null);
   const serverPlaybackPending = useRef(false);
   const [cardMixers, setCardMixers] = useState<CardMixerState[] | null>(null);
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null);
@@ -941,6 +942,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   }
 
   async function deleteRecording(filename: string) {
+    setDeletingFile(filename);
     try {
       const res = await fetch(
         `/api/recordings/${encodeURIComponent(filename)}`,
@@ -957,6 +959,8 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
       }
     } catch {
       toast.error("Failed to delete recording");
+    } finally {
+      setDeletingFile(null);
     }
   }
 
@@ -2407,11 +2411,15 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                                 variant="ghost"
                                 size="icon"
                                 className="h-9 w-9"
-                                disabled={isActive}
+                                disabled={isActive || deletingFile === rec.filename}
                                 aria-label="Delete"
                                 title="Delete"
                               >
-                                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                                {deletingFile === rec.filename ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                                )}
                               </Button>
                             </AlertDialogTrigger>
                             <AlertDialogContent>
@@ -2425,8 +2433,10 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                                 <AlertDialogAction
                                   variant="destructive"
+                                  disabled={deletingFile === rec.filename}
                                   onClick={() => deleteRecording(rec.filename)}
                                 >
+                                  {deletingFile === rec.filename && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                   Delete
                                 </AlertDialogAction>
                               </AlertDialogFooter>
