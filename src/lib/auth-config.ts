@@ -31,7 +31,11 @@ let _authEnabled: boolean | null = null;
 
 export async function isAuthEnabled(): Promise<boolean> {
   if (_authEnabled === null) {
-    _authEnabled = (await getAuthCredentials()) !== null;
+    if (process.env.AUTH_ACTIVE === "false") {
+      _authEnabled = false;
+    } else {
+      _authEnabled = (await getAuthCredentials()) !== null;
+    }
   }
   return _authEnabled;
 }

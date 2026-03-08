@@ -1992,7 +1992,10 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                 )}
               </div>
               {talkbackActive && (
-                <LevelMeter analyserNode={talkbackAnalyserRef.current} active={talkbackActive} />
+                <>
+                  <LiveWaveform analyserNode={talkbackAnalyserRef.current} active={talkbackActive} />
+                  <LevelMeter analyserNode={talkbackAnalyserRef.current} active={talkbackActive} />
+                </>
               )}
               {talkbackRejected && (
                 <p className="text-xs text-destructive">Talkback is in use by another client.</p>
@@ -2023,7 +2026,10 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
                   Record from browser mic
                 </Label>
                 {clientRecording && (
-                  <LevelMeter analyserNode={clientRecordAnalyserRef.current} active={clientRecording} />
+                  <>
+                    <LiveWaveform analyserNode={clientRecordAnalyserRef.current} active={clientRecording} />
+                    <LevelMeter analyserNode={clientRecordAnalyserRef.current} active={clientRecording} />
+                  </>
                 )}
               </div>
             </CardContent>
