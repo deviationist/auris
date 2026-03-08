@@ -22,14 +22,21 @@ async function isWsAuthenticated(req: IncomingMessage): Promise<boolean> {
   if (!(await isAuthEnabled())) return true;
 
   const cookie = req.headers.cookie || "";
-  // Auth.js uses "authjs.session-token" in v5
-  const match = cookie.match(/(?:^|;\s*)authjs\.session-token=([^;]+)/);
+  // Auth.js v5 uses "__Secure-authjs.session-token" on HTTPS, "authjs.session-token" on HTTP
+  const secureName = "__Secure-authjs.session-token";
+  const plainName = "authjs.session-token";
+
+  const secureMatch = cookie.match(new RegExp(`(?:^|;\\s*)${secureName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=([^;]+)`));
+  const plainMatch = cookie.match(/(?:^|;\s*)authjs\.session-token=([^;]+)/);
+  const match = secureMatch || plainMatch;
   if (!match) return false;
+
+  const salt = secureMatch ? secureName : plainName;
 
   try {
     const secret = process.env.AUTH_SECRET;
     if (!secret) return false;
-    const token = await decode({ token: match[1], secret, salt: "authjs.session-token" });
+    const token = await decode({ token: match[1], secret, salt });
     return token !== null;
   } catch {
     return false;
