@@ -7,7 +7,7 @@ Remote audio console for monitoring, recording, and two-way communication. Strea
 ```
 Browser (React/Next.js)
   ↕ API routes
-Next.js (port 3075) ──proxy /stream/*──→ Icecast2 (port 8000, localhost)
+Next.js (port 3000) ──proxy /stream/*──→ Icecast2 (port 8000, localhost)
   ↕ sudo systemctl                            ↑
 systemd: auris-stream                    ffmpeg (ALSA → MP3)
   → stream.sh (ALSA → Icecast)              ↑
@@ -20,7 +20,7 @@ Two independent systemd services:
 - **`auris-stream`**: ALSA → MP3 → Icecast. Runs when user is listening OR recording.
 - **`auris-record`**: Reads Icecast `http://localhost:8000/mic` with `-c copy` (no re-encoding). Only runs when recording.
 
-Toggling recording starts/stops only `auris-record` — the Icecast stream is never interrupted. Config flags `CAPTURE_STREAM` and `CAPTURE_RECORD` in `/etc/default/auris` track user intent (listening/recording) so the stream service knows when it's safe to stop.
+Recording start ensures `auris-stream` is running first (since `auris-record` reads from Icecast). Recording stop shuts down `auris-stream` only if the user isn't also listening. Config flags `CAPTURE_STREAM` and `CAPTURE_RECORD` in `/etc/default/auris` track user intent (listening/recording) so the stream service knows when it's safe to stop.
 
 ## Tech Stack
 
@@ -55,7 +55,7 @@ Toggling recording starts/stops only `auris-record` — the Icecast stream is ne
 | `src/lib/server-playback.ts` | Server-side playback: ffmpeg MP3 → ALSA output (globalThis singleton) |
 | `src/lib/talkback.ts` | Browser-to-server talkback: receives PCM audio, plays via ALSA (globalThis singleton) |
 | `src/app/api/talkback/stop/route.ts` | POST — force-stop talkback (kills server-side ffmpeg) |
-| `server.ts` | Custom HTTP/WebSocket server (talkback WS upgrade, Next.js handler) |
+| `server.ts` | Custom HTTP/WebSocket server (talkback WS upgrade with auth, Next.js handler) |
 | `src/lib/talkback-effects.ts` | Voice effects definitions and ffmpeg filter chain builder |
 | `src/lib/waveform.ts` | Shared waveform generation (ffmpeg PCM → peaks JSON) |
 | `src/lib/db/schema.ts` | Drizzle ORM schema (recordings table) |
@@ -91,12 +91,12 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 
 ## Patterns
 
-- API routes use `@/lib/systemctl` for service control (all via `sudo`)
-- ALSA operations go through `@/lib/alsa.ts` (parses `arecord -l`, `amixer` output)
+- API routes use `@/lib/systemctl` for service control (all via `sudo`); uses `execFile` (no shell) with an allowlist of valid unit names
+- ALSA operations go through `@/lib/alsa.ts` (parses `arecord -l`, `amixer` output); uses `execFile` (no shell) with input validation
 - UI components from `src/components/ui/` (shadcn/ui — do not edit directly)
 - Audio encoding: MP3 128kbps, 44.1kHz, mono everywhere
-- Icecast mount: `/mic` (source password: `sourcepass`)
-- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`
+- Icecast mount: `/mic` (source password from `ICECAST_SOURCE_PASSWORD` in `/etc/default/auris`)
+- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`
 - Server playback and talkback both use `globalThis` singletons to survive HMR in dev mode and share state with API routes
 - Server playback and talkback are mutually exclusive (talkback takes priority)
 - Voice effects (pitch shift, echo, chorus, flanger, vibrato, tempo, autotune) apply to both talkback and client recordings via ffmpeg filters (`buildFilterChain` in `talkback-effects.ts`)
@@ -107,8 +107,10 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - Pitch shift and tempo both use `rubberband` filter (real-time capable); combined into one filter when both active
 - `LevelMeter` component supports two modes: `audioElement`+`audioContext` (monitor/playback) or direct `analyserNode` (talkback/client recording)
 - Auth is optional: omit `AUTH_USERNAME`/`AUTH_PASSWORD_HASH` to disable. `src/proxy.ts` checks `isAuthEnabled()` and skips auth when unconfigured.
+- WebSocket talkback in `server.ts` validates the `authjs.session-token` JWT cookie when auth is enabled
 - `.env.local` — `AUTH_SECRET` (required when auth enabled), `AUTH_TRUST_HOST=true`
-- Sudoers at `system/auris-sudoers` — update when adding new privileged commands
+- Sudoers at `system/auris-sudoers` — uses `%%USER%%` placeholder, substituted by `setup.sh`
+- Icecast passwords use `%%PLACEHOLDER%%` tokens in `system/icecast.xml`, substituted by `setup.sh` with random values
 - DB path: `DATABASE_PATH` env var or `./data/auris.db` (must be local filesystem, not CIFS/NFS)
 - Recordings dir: `RECORDINGS_DIR` env var or `/recordings`
 

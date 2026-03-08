@@ -1,8 +1,6 @@
-import { readFile } from "fs/promises";
-import { exec as execCb } from "child_process";
-import { promisify } from "util";
+import { readFile, writeFile } from "fs/promises";
+import { spawn } from "child_process";
 
-const exec = promisify(execCb);
 const CONFIG_PATH = "/etc/default/auris";
 
 async function readConfig(): Promise<Record<string, string>> {
@@ -22,13 +20,31 @@ async function readConfig(): Promise<Record<string, string>> {
 async function writeConfig(config: Record<string, string>): Promise<void> {
   const content = Object.entries(config)
     .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
-  await exec(`echo '${content}' | sudo tee ${CONFIG_PATH} > /dev/null`);
+    .join("\n") + "\n";
+
+  // Try direct write first, fall back to sudo tee
+  try {
+    await writeFile(CONFIG_PATH, content, "utf-8");
+  } catch {
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn("sudo", ["tee", CONFIG_PATH], {
+        stdio: ["pipe", "ignore", "pipe"],
+      });
+      proc.stdin.end(content);
+      let stderr = "";
+      proc.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+      proc.on("close", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`sudo tee failed (code ${code}): ${stderr}`));
+      });
+      proc.on("error", reject);
+    });
+  }
 }
 
 export async function getListenDevice(): Promise<string> {
   const config = await readConfig();
-  return config.ALSA_DEVICE_LISTEN || config.ALSA_DEVICE || "plughw:CARD=PCH,DEV=0";
+  return config.ALSA_DEVICE_LISTEN || config.ALSA_DEVICE || "default";
 }
 
 export async function setListenDevice(alsaId: string): Promise<void> {
@@ -40,7 +56,7 @@ export async function setListenDevice(alsaId: string): Promise<void> {
 
 export async function getRecordDevice(): Promise<string> {
   const config = await readConfig();
-  return config.ALSA_DEVICE_RECORD || config.ALSA_DEVICE || "plughw:CARD=PCH,DEV=0";
+  return config.ALSA_DEVICE_RECORD || config.ALSA_DEVICE || "default";
 }
 
 export async function setRecordDevice(alsaId: string): Promise<void> {
@@ -73,7 +89,7 @@ export async function setRecordBitrate(bitrate: string): Promise<void> {
 
 export async function getPlaybackDevice(): Promise<string> {
   const config = await readConfig();
-  return config.ALSA_DEVICE_PLAYBACK || "plughw:CARD=PCH,DEV=0";
+  return config.ALSA_DEVICE_PLAYBACK || "default";
 }
 
 export async function setPlaybackDevice(alsaId: string): Promise<void> {
@@ -155,6 +171,11 @@ export async function setRecordChunkMinutes(minutes: number): Promise<void> {
     delete config.RECORD_CHUNK_MINUTES;
   }
   await writeConfig(config);
+}
+
+export async function getIcecastSourcePassword(): Promise<string> {
+  const config = await readConfig();
+  return config.ICECAST_SOURCE_PASSWORD || "sourcepass";
 }
 
 export async function getClientRecordMaxMinutes(): Promise<number> {

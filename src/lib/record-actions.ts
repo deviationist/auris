@@ -1,5 +1,5 @@
-import { setCaptureMode, getRecordStartedAt, setRecordStartedAt, getRecordChunkMinutes, getRecordChunkPart, setRecordChunkPart } from "@/lib/device-config";
-import { startUnit, stopUnit } from "@/lib/systemctl";
+import { setCaptureMode, getCaptureMode, getRecordStartedAt, setRecordStartedAt, getRecordChunkMinutes, getRecordChunkPart, setRecordChunkPart } from "@/lib/device-config";
+import { isActive, startUnit, stopUnit } from "@/lib/systemctl";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -64,6 +64,16 @@ export async function startRecording(chunkPart?: number): Promise<void> {
 
   await setCaptureMode({ record: true });
   await setRecordStartedAt(startedAt);
+
+  // Ensure the Icecast stream is running before starting the recorder
+  // (record.sh reads from Icecast, not ALSA directly)
+  const streamActive = await isActive("auris-stream");
+  if (!streamActive) {
+    await startUnit("auris-stream");
+    // Give Icecast a moment to accept the source
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+
   await startUnit("auris-record");
 
   scheduleChunk(chunkMinutes, startedAt);
@@ -80,6 +90,12 @@ export async function stopRecording(): Promise<number> {
   await setRecordStartedAt(null);
   await setRecordChunkPart(null);
   await stopUnit("auris-record");
+
+  // Stop the Icecast stream if user isn't also listening
+  const mode = await getCaptureMode();
+  if (!mode.stream) {
+    await stopUnit("auris-stream");
+  }
 
   if (startedAt) {
     await new Promise((r) => setTimeout(r, 500));

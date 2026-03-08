@@ -1,7 +1,7 @@
-import { exec as execCb } from "child_process";
+import { execFile as execFileCb } from "child_process";
 import { promisify } from "util";
 
-const exec = promisify(execCb);
+const execFile = promisify(execFileCb);
 
 export interface CaptureDevice {
   card: number;
@@ -27,9 +27,21 @@ export interface MixerEnum {
   current: string;
 }
 
+function validateCard(card: number): void {
+  if (!Number.isInteger(card) || card < 0 || card > 31) {
+    throw new Error(`Invalid ALSA card number: ${card}`);
+  }
+}
+
+function validateVolume(value: number): void {
+  if (!Number.isInteger(value) || value < 0 || value > 65536) {
+    throw new Error(`Invalid volume value: ${value}`);
+  }
+}
+
 export async function listCaptureDevices(): Promise<CaptureDevice[]> {
   try {
-    const { stdout } = await exec("sudo arecord -l");
+    const { stdout } = await execFile("sudo", ["arecord", "-l"]);
     const regex =
       /^card (\d+): (\S+) \[(.+?)\], device (\d+): (.+?) \[/gm;
     const devices: CaptureDevice[] = [];
@@ -59,7 +71,7 @@ export interface PlaybackDevice {
 
 export async function listPlaybackDevices(): Promise<PlaybackDevice[]> {
   try {
-    const { stdout } = await exec("sudo aplay -l");
+    const { stdout } = await execFile("sudo", ["aplay", "-l"]);
     const regex =
       /^card (\d+): (\S+) \[(.+?)\], device (\d+): (.+?) \[/gm;
     const devices: PlaybackDevice[] = [];
@@ -82,10 +94,11 @@ export async function listPlaybackDevices(): Promise<PlaybackDevice[]> {
 export async function getCaptureVolume(
   card: number = 0
 ): Promise<MixerVolume | null> {
+  validateCard(card);
   try {
-    const { stdout } = await exec(
-      `sudo amixer -c ${card} sget 'Capture'`
-    );
+    const { stdout } = await execFile("sudo", [
+      "amixer", "-c", String(card), "sget", "Capture",
+    ]);
     return parseVolume("Capture", stdout);
   } catch {
     return null;
@@ -95,10 +108,11 @@ export async function getCaptureVolume(
 export async function getMicBoost(
   card: number = 0
 ): Promise<MixerVolume | null> {
+  validateCard(card);
   try {
-    const { stdout } = await exec(
-      `sudo amixer -c ${card} sget 'Mic Boost'`
-    );
+    const { stdout } = await execFile("sudo", [
+      "amixer", "-c", String(card), "sget", "Mic Boost",
+    ]);
     return parseVolume("Mic Boost", stdout);
   } catch {
     return null;
@@ -108,10 +122,11 @@ export async function getMicBoost(
 export async function getInputSource(
   card: number = 0
 ): Promise<MixerEnum | null> {
+  validateCard(card);
   try {
-    const { stdout } = await exec(
-      `sudo amixer -c ${card} sget 'Input Source'`
-    );
+    const { stdout } = await execFile("sudo", [
+      "amixer", "-c", String(card), "sget", "Input Source",
+    ]);
     const itemsMatch = stdout.match(/Items:\s*(.+)/);
     const currentMatch = stdout.match(/Item0:\s*'(.+?)'/);
     if (!itemsMatch) return null;
@@ -129,12 +144,13 @@ export async function getInputSource(
 export async function getPlaybackVolume(
   card: number = 0
 ): Promise<MixerVolume | null> {
+  validateCard(card);
   // Try common playback control names
   for (const name of ["PCM Playback Volume", "PCM", "Speaker", "Headphone"]) {
     try {
-      const { stdout } = await exec(
-        `sudo amixer -c ${card} sget '${name}'`
-      );
+      const { stdout } = await execFile("sudo", [
+        "amixer", "-c", String(card), "sget", name,
+      ]);
       const result = parseVolume(name, stdout);
       if (result) return result;
     } catch {
@@ -148,9 +164,13 @@ export async function setPlaybackVolume(
   value: number,
   card: number = 0
 ): Promise<void> {
+  validateCard(card);
+  validateVolume(value);
   for (const name of ["PCM Playback Volume", "PCM", "Speaker", "Headphone"]) {
     try {
-      await exec(`sudo amixer -c ${card} sset '${name}' ${value}`);
+      await execFile("sudo", [
+        "amixer", "-c", String(card), "sset", name, String(value),
+      ]);
       return;
     } catch {
       // control doesn't exist, try next
@@ -163,21 +183,36 @@ export async function setCaptureVolume(
   value: number,
   card: number = 0
 ): Promise<void> {
-  await exec(`sudo amixer -c ${card} sset 'Capture' ${value}`);
+  validateCard(card);
+  validateVolume(value);
+  await execFile("sudo", [
+    "amixer", "-c", String(card), "sset", "Capture", String(value),
+  ]);
 }
 
 export async function setMicBoost(
   value: number,
   card: number = 0
 ): Promise<void> {
-  await exec(`sudo amixer -c ${card} sset 'Mic Boost' ${value}`);
+  validateCard(card);
+  validateVolume(value);
+  await execFile("sudo", [
+    "amixer", "-c", String(card), "sset", "Mic Boost", String(value),
+  ]);
 }
 
 export async function setInputSource(
   source: string,
   card: number = 0
 ): Promise<void> {
-  await exec(`sudo amixer -c ${card} sset 'Input Source' '${source}'`);
+  validateCard(card);
+  // Validate source contains only safe characters (alphanumeric, spaces, hyphens)
+  if (!/^[a-zA-Z0-9 \-]+$/.test(source)) {
+    throw new Error(`Invalid input source name: ${source}`);
+  }
+  await execFile("sudo", [
+    "amixer", "-c", String(card), "sset", "Input Source", source,
+  ]);
 }
 
 function parseVolume(name: string, stdout: string): MixerVolume | null {

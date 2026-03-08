@@ -39,17 +39,30 @@ sudo chown "$USER":"$USER" "$RECORDINGS_DIR"
 echo "==> Creating data directory for SQLite DB..."
 mkdir -p "$APP_DIR/data"
 
+# --- Generate Icecast passwords ---
+ICECAST_SOURCE_PW=$(openssl rand -base64 16 | tr -d '=/+' | head -c 16)
+ICECAST_RELAY_PW=$(openssl rand -base64 16 | tr -d '=/+' | head -c 16)
+ICECAST_ADMIN_PW=$(openssl rand -base64 16 | tr -d '=/+' | head -c 16)
+
 # --- Install /etc/default/auris config ---
 if [ ! -f /etc/default/auris ]; then
   echo "==> Creating /etc/default/auris config..."
   sudo tee /etc/default/auris > /dev/null <<EOF
-ALSA_DEVICE=plughw:1,0
+ALSA_DEVICE=default
 CAPTURE_STREAM=false
 CAPTURE_RECORD=false
 RECORDINGS_DIR=$RECORDINGS_DIR
+ICECAST_SOURCE_PASSWORD=$ICECAST_SOURCE_PW
 EOF
 else
   echo "==> /etc/default/auris already exists, skipping"
+  # Ensure Icecast password is present
+  if ! grep -q '^ICECAST_SOURCE_PASSWORD=' /etc/default/auris 2>/dev/null; then
+    echo "ICECAST_SOURCE_PASSWORD=$ICECAST_SOURCE_PW" | sudo tee -a /etc/default/auris > /dev/null
+    echo "    Added ICECAST_SOURCE_PASSWORD to existing config"
+  else
+    ICECAST_SOURCE_PW=$(grep '^ICECAST_SOURCE_PASSWORD=' /etc/default/auris | cut -d= -f2)
+  fi
 fi
 
 # --- Set up authentication credentials ---
@@ -104,7 +117,11 @@ fi
 
 # --- Install Icecast config ---
 echo "==> Installing Icecast2 config..."
-sudo cp "$APP_DIR/system/icecast.xml" /etc/icecast2/icecast.xml
+sed \
+  -e "s/%%ICECAST_SOURCE_PASSWORD%%/$ICECAST_SOURCE_PW/" \
+  -e "s/%%ICECAST_RELAY_PASSWORD%%/$ICECAST_RELAY_PW/" \
+  -e "s/%%ICECAST_ADMIN_PASSWORD%%/$ICECAST_ADMIN_PW/" \
+  "$APP_DIR/system/icecast.xml" | sudo tee /etc/icecast2/icecast.xml > /dev/null
 sudo systemctl restart icecast2 || sudo /etc/init.d/icecast2 restart
 
 # --- Stop and remove old auris-capture service ---
@@ -122,7 +139,7 @@ sudo systemctl daemon-reload
 # --- Install sudoers ---
 echo "==> Installing sudoers file for $USER..."
 SUDOERS_TMP=$(mktemp)
-sed "s/^trym /${USER} /" "$APP_DIR/system/auris-sudoers" > "$SUDOERS_TMP"
+sed "s/%%USER%%/${USER}/" "$APP_DIR/system/auris-sudoers" > "$SUDOERS_TMP"
 sudo cp "$SUDOERS_TMP" /etc/sudoers.d/auris
 sudo chmod 440 /etc/sudoers.d/auris
 rm -f "$SUDOERS_TMP"

@@ -90,8 +90,19 @@ export function LiveWaveform({ active, audioContext, streamUrl }: LiveWaveformPr
 
     (async () => {
       try {
-        const res = await fetch(streamUrl, { signal: abortController.signal });
-        if (!res.ok || !res.body) return;
+        // Retry until the Icecast stream is available (it may start after recording)
+        let res: Response | null = null;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          if (abortController.signal.aborted) return;
+          const r = await fetch(streamUrl, { signal: abortController.signal });
+          if (r.ok && r.body) {
+            res = r;
+            break;
+          }
+          // Stream not ready yet — wait and retry
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        if (!res || !res.body) return;
 
         const reader = res.body.getReader();
         let buffer = new Uint8Array(0);
@@ -137,7 +148,10 @@ export function LiveWaveform({ active, audioContext, streamUrl }: LiveWaveformPr
 
             buffer = new Uint8Array(0);
             pendingBytes = 0;
-          } catch {
+          } catch (decodeErr) {
+            if (process.env.NODE_ENV === "development") {
+              console.warn("[LiveWaveform] decode failed:", decodeErr, "bufLen:", buffer.length);
+            }
             if (buffer.length > MAX_BUFFER) {
               buffer = buffer.slice(-512);
               pendingBytes = 0;

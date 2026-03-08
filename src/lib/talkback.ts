@@ -61,9 +61,20 @@ export function handleTalkbackSocket(ws: WebSocket, query: ParsedUrlQuery = {}) 
     console.log(`[talkback] cleanup — received ${messageCount} messages, ${bytesReceived} bytes`);
     if (getSession()?.ws === ws) setSession(null);
     if (ffmpeg) {
-      ffmpeg.stdin?.destroy();
-      ffmpeg.kill("SIGKILL");
+      const proc = ffmpeg;
       ffmpeg = null;
+      // Close stdin gracefully so ffmpeg can flush its buffer and play out
+      if (proc.stdin?.writable) {
+        proc.stdin.end();
+      }
+      // Give ffmpeg time to finish, then force-kill as fallback
+      const killTimeout = setTimeout(() => {
+        if (!proc.killed) {
+          console.log("[talkback] ffmpeg drain timeout, force killing");
+          proc.kill("SIGKILL");
+        }
+      }, 3000);
+      proc.on("exit", () => clearTimeout(killTimeout));
     }
   }
 

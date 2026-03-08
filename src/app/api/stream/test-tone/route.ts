@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isActive } from "@/lib/systemctl";
+import { getIcecastSourcePassword } from "@/lib/device-config";
 import { spawn, ChildProcess } from "child_process";
 
 let toneProcess: ChildProcess | null = null;
@@ -48,6 +49,7 @@ export async function POST() {
       );
     }
 
+    const icecastPassword = await getIcecastSourcePassword();
     toneProcess = spawn("ffmpeg", [
       "-re",
       "-f", "lavfi",
@@ -59,7 +61,7 @@ export async function POST() {
       "-ac", "1",
       "-content_type", "audio/mpeg",
       "-f", "mp3",
-      "icecast://source:sourcepass@localhost:8000/mic",
+      `icecast://source:${icecastPassword}@localhost:8000/mic`,
     ]);
 
     let stderr = "";

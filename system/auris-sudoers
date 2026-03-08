@@ -1,4 +1,4 @@
-trym ALL=(ALL) NOPASSWD: /usr/bin/systemctl start auris-stream, \
+%%USER%% ALL=(ALL) NOPASSWD: /usr/bin/systemctl start auris-stream, \
                              /usr/bin/systemctl stop auris-stream, \
                              /usr/bin/systemctl restart auris-stream, \
                              /usr/bin/systemctl is-active auris-stream, \
