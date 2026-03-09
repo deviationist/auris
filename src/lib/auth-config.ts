@@ -31,8 +31,18 @@ let _authEnabled: boolean | null = null;
 
 export async function isAuthEnabled(): Promise<boolean> {
   if (_authEnabled === null) {
-    if (process.env.AUTH_ACTIVE === "false") {
+    const authActive = process.env.AUTH_ACTIVE;
+    if (authActive === "false") {
       _authEnabled = false;
+    } else if (authActive && authActive !== "true") {
+      // Comma-separated list of environments where auth is active (e.g. "production,staging")
+      const envs = authActive.split(",").map((e) => e.trim().toLowerCase());
+      const currentEnv = (process.env.NODE_ENV || "development").toLowerCase();
+      if (!envs.includes(currentEnv)) {
+        _authEnabled = false;
+      } else {
+        _authEnabled = (await getAuthCredentials()) !== null;
+      }
     } else {
       _authEnabled = (await getAuthCredentials()) !== null;
     }

@@ -123,7 +123,7 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - Transcriptions run in a serial queue (`globalThis` singleton) to avoid CPU overload — one at a time
 - Transcription is fire-and-forget after recordings complete (server + client), with on-demand trigger via API/UI
 - Stream idle detection in `src/lib/stream-idle.ts` — auto-stops `auris-stream` when `CAPTURE_STREAM=1`, `CAPTURE_RECORD=0`, and 0 Icecast listeners for 60s
-- `AUTH_ACTIVE=false` env var disables auth regardless of credentials config
+- `AUTH_ACTIVE` env var controls auth: `false` disables, `true` or unset uses credentials config, comma-separated env names (e.g. `production,staging`) enables auth only in matching `NODE_ENV`
 
 ## Development workflow
 
