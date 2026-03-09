@@ -1376,7 +1376,7 @@ export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
 
   return (
     <main id="main" className="min-h-screen bg-background p-6 md:p-10">
-      <div className="mx-auto max-w-4xl space-y-6">
+      <div className="mx-auto max-w-5xl space-y-6">
         {/* Header */}
         <div className="flex items-center gap-3">
           <AudioLines className="h-8 w-8 text-primary" />
