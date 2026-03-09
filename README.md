@@ -2,7 +2,7 @@
 
 Remote audio console for monitoring, recording, and two-way communication. Streams live audio via Icecast2, records to disk (server and client), provides push-to-talk intercom with voice effects, VOX (voice-operated recording), offline transcription via whisper.cpp, and plays recordings through the server speaker — all controlled through a Next.js web UI.
 
-![Auris screenshot](screenshot-v3.jpg)
+![Auris screenshot](screenshot-v4.jpg)
 
 ## Architecture
 
@@ -12,7 +12,7 @@ Browser  ──>  Nginx (:80/:443)  ──>  Next.js (:3000)   ── API ──
                    │                     │ Auth.js (optional)     auris-stream  auris-record
                    │                     │ SQLite DB              (ALSA→Icecast) (Icecast→file)
                    │                     │ (recording metadata)         │
-                   └── /stream/ ───>  Icecast2 (:8000)  <──────────────┘
+                   └── /stream/ ───>  Icecast2 (:8000)  <───────────────┘
                                                                         │
                                                                   Audio Source
                                                                  (ALSA capture)
