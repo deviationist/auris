@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isActive } from "@/lib/systemctl";
-import { getRecordDevice, getRecordStartedAt, getRecordChunkMinutes, getClientRecordMaxMinutes } from "@/lib/device-config";
+import { getRecordDevice, getRecordStartedAt, getRecordChunkMinutes, getClientRecordMaxMinutes, getCompressorConfig } from "@/lib/device-config";
 import { listCaptureDevices } from "@/lib/alsa";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
@@ -104,8 +104,9 @@ export async function GET() {
 
     const server_playback = getActivePlayback();
     const vox = getVoxStatus();
+    const compressor = await getCompressorConfig();
 
-    return NextResponse.json({ streaming, recording, recording_file, recording_started, record_chunk_minutes, client_record_max_minutes, server_playback, vox });
+    return NextResponse.json({ streaming, recording, recording_file, recording_started, record_chunk_minutes, client_record_max_minutes, server_playback, vox, compressor });
   } catch (error) {
     return NextResponse.json(
       { error: "Failed to get status", detail: String(error) },

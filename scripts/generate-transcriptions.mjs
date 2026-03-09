@@ -22,9 +22,32 @@ const whisperBin = process.env.WHISPER_BIN || "whisper-cpp";
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
 const DB_PATH = process.env.DATABASE_PATH || join(process.cwd(), "data", "auris.db");
 
+function parseTimestamp(ts) {
+  const parts = ts.split(":");
+  return parseInt(parts[0], 10) * 3600 + parseInt(parts[1], 10) * 60 + parseFloat(parts[2]);
+}
+
+function parseTimestampedOutput(output) {
+  const segments = [];
+  const textParts = [];
+  const lineRegex = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s*(.*)$/;
+
+  for (const line of output.split("\n")) {
+    const match = line.match(lineRegex);
+    if (match) {
+      const segText = match[3].trim();
+      segments.push({ start: parseTimestamp(match[1]), end: parseTimestamp(match[2]), text: segText });
+      if (segText) textParts.push(segText);
+    }
+  }
+
+  if (segments.length === 0) return { text: output, segments: [] };
+  return { text: textParts.join(" "), segments };
+}
+
 function runWhisper(audioPath, lang, modelPath) {
   return new Promise((resolve, reject) => {
-    const args = ["-m", modelPath, "-f", audioPath, "--no-timestamps"];
+    const args = ["-m", modelPath, "-f", audioPath];
     if (lang !== "auto") args.push("-l", lang);
 
     const proc = spawn(whisperBin, args);
@@ -38,12 +61,17 @@ function runWhisper(audioPath, lang, modelPath) {
         reject(new Error(`whisper-cpp exited with code ${code}: ${stderr.slice(0, 500)}`));
         return;
       }
-      const text = Buffer.concat(chunks).toString().trim();
+      const stdout = Buffer.concat(chunks).toString().trim();
       const stderr = Buffer.concat(stderrChunks).toString();
       let detectedLang = lang;
       const langMatch = stderr.match(/auto-detected language:\s*(\w+)/i);
       if (langMatch) detectedLang = langMatch[1];
-      resolve({ text, language: detectedLang });
+
+      const { text, segments } = parseTimestampedOutput(stdout);
+      const stored = segments.length > 0
+        ? JSON.stringify({ text, segments })
+        : text;
+      resolve({ text: stored, language: detectedLang });
     });
     proc.on("error", (err) => {
       if (err.code === "ENOENT") {

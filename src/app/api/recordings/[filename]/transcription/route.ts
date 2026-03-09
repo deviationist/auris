@@ -3,7 +3,7 @@ import { basename, join } from "path";
 import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { generateTranscription, enqueueTranscription } from "@/lib/transcription";
+import { generateTranscription, enqueueTranscription, parseStoredTranscription, getTranscriptionProgress, setTranscriptionProgress, clearTranscriptionProgress, createTranscriptionAbort, cancelTranscription } from "@/lib/transcription";
 
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
 
@@ -32,10 +32,18 @@ export async function GET(
     return NextResponse.json({ error: "Recording not found" }, { status: 404 });
   }
 
+  const { text, segments } = parseStoredTranscription(row.transcription);
+
+  const progress = (row.status === "processing" || row.status === "pending")
+    ? getTranscriptionProgress(safe)
+    : null;
+
   return NextResponse.json({
-    transcription: row.transcription,
+    transcription: text,
+    segments,
     language: row.language,
     status: row.status,
+    progress,
   });
 }
 
@@ -78,23 +86,38 @@ export async function POST(
   // Mark as pending and enqueue
   await db.update(recordings).set({ transcriptionStatus: "pending" }).where(eq(recordings.filename, safe));
 
+  setTranscriptionProgress(safe, 0);
+  const signal = createTranscriptionAbort(safe);
   enqueueTranscription(async () => {
+    if (signal.aborted) throw new Error("Transcription cancelled");
     await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, safe));
-    const result = await generateTranscription(filePath, { language });
+    const result = await generateTranscription(filePath, {
+      language,
+      onProgress: (pct) => setTranscriptionProgress(safe, pct),
+      signal,
+    });
+    const stored = result.segments.length > 0
+      ? JSON.stringify({ text: result.text, segments: result.segments })
+      : result.text;
     await db.update(recordings).set({
-      transcription: result.text,
+      transcription: stored,
       transcriptionLang: result.language,
       transcriptionStatus: "done",
     }).where(eq(recordings.filename, safe));
+    clearTranscriptionProgress(safe);
   }).catch(() => {
-    db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, safe)).catch(() => {});
+    clearTranscriptionProgress(safe);
+    // Don't mark as error if cancelled — the DELETE handler manages the status
+    if (!signal.aborted) {
+      db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, safe)).catch(() => {});
+    }
   });
 
   return NextResponse.json({ ok: true, status: "pending" });
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ filename: string }> }
 ) {
   const { filename } = await params;
@@ -103,11 +126,25 @@ export async function DELETE(
     return NextResponse.json({ error: "Invalid filename" }, { status: 400 });
   }
 
+  // Cancel any in-progress transcription
+  cancelTranscription(safe);
+
   const db = getDb();
+
+  // Check if cancel or clear: if there's existing text, keep it (revert to done)
+  const cancel = req.nextUrl.searchParams.get("cancel") === "1";
+  if (cancel) {
+    const row = await db.select({ transcription: recordings.transcription }).from(recordings).where(eq(recordings.filename, safe)).get();
+    if (row?.transcription) {
+      await db.update(recordings).set({ transcriptionStatus: "done" }).where(eq(recordings.filename, safe));
+      return NextResponse.json({ ok: true, action: "cancelled" });
+    }
+  }
+
   await db
     .update(recordings)
     .set({ transcription: null, transcriptionLang: null, transcriptionStatus: null })
     .where(eq(recordings.filename, safe));
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, action: cancel ? "cancelled" : "cleared" });
 }

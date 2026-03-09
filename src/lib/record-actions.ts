@@ -9,7 +9,7 @@ import { join } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { generateWaveform, hashWaveform } from "@/lib/waveform";
-import { generateTranscription, enqueueTranscription } from "@/lib/transcription";
+import { generateTranscription, enqueueTranscription, setTranscriptionProgress, clearTranscriptionProgress, createTranscriptionAbort } from "@/lib/transcription";
 import { scheduleChunk, cancelChunk } from "@/lib/record-chunker";
 
 const execFileAsync = promisify(execFile);
@@ -128,12 +128,20 @@ export async function stopRecording(): Promise<number> {
           })
           .catch(() => {});
         // Fire-and-forget transcription (queued, serial)
+        setTranscriptionProgress(activeFile, 0);
+        const signal = createTranscriptionAbort(activeFile);
         enqueueTranscription(async () => {
+          if (signal.aborted) throw new Error("Transcription cancelled");
           await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, activeFile));
-          const { text, language } = await generateTranscription(filePath);
-          await db.update(recordings).set({ transcription: text, transcriptionLang: language, transcriptionStatus: "done" }).where(eq(recordings.filename, activeFile));
+          const result = await generateTranscription(filePath, { onProgress: (pct) => setTranscriptionProgress(activeFile, pct), signal });
+          const stored = result.segments.length > 0 ? JSON.stringify({ text: result.text, segments: result.segments }) : result.text;
+          await db.update(recordings).set({ transcription: stored, transcriptionLang: result.language, transcriptionStatus: "done" }).where(eq(recordings.filename, activeFile));
+          clearTranscriptionProgress(activeFile);
         }).catch(() => {
-          db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, activeFile)).catch(() => {});
+          clearTranscriptionProgress(activeFile);
+          if (!signal.aborted) {
+            db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, activeFile)).catch(() => {});
+          }
         });
       } catch {
         // ignore metadata update failure

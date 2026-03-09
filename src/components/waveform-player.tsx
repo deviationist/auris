@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, type MutableRefObject } from "react";
 import { Button } from "@/components/ui/button";
 import { Play, Pause, Loader2, RotateCcw } from "lucide-react";
 import { LevelMeter } from "@/components/level-meter";
@@ -8,6 +8,8 @@ import { LevelMeter } from "@/components/level-meter";
 interface WaveformPlayerProps {
   src: string;
   waveformUrl: string;
+  onTimeUpdate?: (time: number) => void;
+  seekRef?: MutableRefObject<((time: number) => void) | null>;
 }
 
 function formatTime(seconds: number): string {
@@ -16,7 +18,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function WaveformPlayer({ src, waveformUrl }: WaveformPlayerProps) {
+export function WaveformPlayer({ src, waveformUrl, onTimeUpdate, seekRef }: WaveformPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -33,6 +35,8 @@ export function WaveformPlayer({ src, waveformUrl }: WaveformPlayerProps) {
   const [hasEnded, setHasEnded] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const [audioCtxReady, setAudioCtxReady] = useState(false);
+  const onTimeUpdateRef = useRef(onTimeUpdate);
+  onTimeUpdateRef.current = onTimeUpdate;
 
   // Create AudioContext on mount — the parent click event (Play row action)
   // is still the active user gesture, so iOS will allow it to run.
@@ -137,6 +141,7 @@ export function WaveformPlayer({ src, waveformUrl }: WaveformPlayerProps) {
     const progress = audio.duration ? audio.currentTime / audio.duration : 0;
     updateTimeDisplay(audio.currentTime, audio.duration || 0);
     draw(progress);
+    onTimeUpdateRef.current?.(audio.currentTime);
     if (progressBarRef.current) {
       progressBarRef.current.style.width = `${progress * 100}%`;
     }
@@ -233,6 +238,24 @@ export function WaveformPlayer({ src, waveformUrl }: WaveformPlayerProps) {
     observer.observe(canvas);
     return () => observer.disconnect();
   }, [draw]);
+
+  // Expose seek function for external use (e.g. click-to-seek from transcription)
+  useEffect(() => {
+    if (!seekRef) return;
+    seekRef.current = (time: number) => {
+      const audio = audioRef.current;
+      if (!audio || !audio.duration) return;
+      audio.currentTime = Math.max(0, Math.min(time, audio.duration));
+      setHasEnded(false);
+      const progress = audio.currentTime / audio.duration;
+      updateTimeDisplay(audio.currentTime, audio.duration);
+      draw(progress);
+      if (audio.paused) {
+        audio.play().catch(() => {});
+      }
+    };
+    return () => { seekRef.current = null; };
+  }, [seekRef, draw, updateTimeDisplay]);
 
   const togglePlayPause = () => {
     const audio = audioRef.current;

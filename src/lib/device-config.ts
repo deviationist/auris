@@ -195,6 +195,40 @@ export async function setWhisperLanguage(lang: string): Promise<void> {
   await writeConfig(config);
 }
 
+// --- Compressor config ---
+
+export interface CompressorConfig {
+  enabled: boolean;
+  threshold: number;
+  ratio: number;
+  makeup: number;
+  attack: number;
+  release: number;
+}
+
+export async function getCompressorConfig(): Promise<CompressorConfig> {
+  const config = await readConfig();
+  return {
+    enabled: config.COMPRESSOR_ENABLED === "1",
+    threshold: parseFloat(config.COMPRESSOR_THRESHOLD) || -20,
+    ratio: parseFloat(config.COMPRESSOR_RATIO) || 4,
+    makeup: parseFloat(config.COMPRESSOR_MAKEUP) || 6,
+    attack: parseInt(config.COMPRESSOR_ATTACK, 10) || 20,
+    release: parseInt(config.COMPRESSOR_RELEASE, 10) || 250,
+  };
+}
+
+export async function setCompressorConfig(c: Partial<CompressorConfig>): Promise<void> {
+  const config = await readConfig();
+  if (c.enabled !== undefined) config.COMPRESSOR_ENABLED = c.enabled ? "1" : "0";
+  if (c.threshold !== undefined) config.COMPRESSOR_THRESHOLD = String(c.threshold);
+  if (c.ratio !== undefined) config.COMPRESSOR_RATIO = String(c.ratio);
+  if (c.makeup !== undefined) config.COMPRESSOR_MAKEUP = String(c.makeup);
+  if (c.attack !== undefined) config.COMPRESSOR_ATTACK = String(c.attack);
+  if (c.release !== undefined) config.COMPRESSOR_RELEASE = String(c.release);
+  await writeConfig(config);
+}
+
 // --- VOX config ---
 
 export interface VoxConfig {

@@ -41,6 +41,8 @@ VOX (voice-operated switch) monitors the audio input level and automatically sta
 
 Transcription uses whisper.cpp for local, offline speech-to-text. Transcriptions run automatically after recordings complete (fire-and-forget) and can also be triggered on-demand from the UI. A serial queue processes one transcription at a time to avoid CPU overload.
 
+An optional audio compressor (dynamic range compression) can be enabled in the Monitor card settings. It applies ffmpeg's `acompressor` filter in the stream path (`stream.sh`), boosting quiet sounds and taming loud ones. Since recordings use `-c copy` from the Icecast stream, compression automatically propagates to all recordings. Configurable threshold, ratio, makeup gain, attack, and release.
+
 Stream idle detection automatically stops `auris-stream` when no Icecast listeners are connected for 60 seconds (only when streaming without recording), saving CPU.
 
 ## Quick setup
@@ -221,7 +223,7 @@ auris/
 │   ├── proxy.ts                        # Route protection proxy (auth gate)
 │   ├── app/
 │   │   ├── page.tsx                    # Server component (resolves auth state)
-│   │   ├── dashboard.tsx               # Main dashboard UI (client component)
+│   │   ├── dashboard.tsx               # Main dashboard UI (composes card components)
 │   │   ├── layout.tsx                  # Root layout (ThemeProvider)
 │   │   ├── login/page.tsx              # Login page
 │   │   ├── stream/[...path]/route.ts  # Proxies /stream/* to Icecast
@@ -256,11 +258,14 @@ auris/
 │   │           ├── devices/route.ts    # GET  — list ALSA capture devices
 │   │           ├── device/route.ts     # GET/POST — get/set device selections (record, listen, playback)
 │   │           ├── bitrate/route.ts    # GET/POST — stream/record bitrate
+│   │           ├── compressor/route.ts # GET/POST — audio compressor config
 │   │           ├── chunk/route.ts      # POST — receive talkback audio chunk
 │   │           ├── playback/route.ts   # GET/POST — browser playback device selection
 │   │           ├── playback/server/route.ts # GET/POST/DELETE — server-side playback control
 │   │           ├── mixer/route.ts      # GET/POST — read/set mixer levels
 │   │           └── mixer/all/route.ts  # GET — all mixer controls per card
+│   ├── contexts/
+│   │   └── dashboard-context.tsx       # Dashboard context provider (composes domain hooks)
 │   ├── components/
 │   │   ├── ui/                         # shadcn/ui components (do not edit)
 │   │   ├── login-form.tsx              # Login form (client component)
@@ -268,8 +273,24 @@ auris/
 │   │   ├── live-waveform.tsx           # Real-time waveform visualization
 │   │   ├── waveform-player.tsx         # Canvas waveform player with seek, play/pause
 │   │   ├── card-mixer.tsx              # ALSA mixer card component (capture + playback volume)
+│   │   ├── card-recordings-table.tsx   # Recordings table card (filters, pagination)
+│   │   ├── recording-row.tsx           # Single recording row (actions, inline edit, badges)
+│   │   ├── recording-expanded.tsx      # Expanded recording (waveform player, transcription)
+│   │   ├── transcription-panel.tsx     # Transcription display (prose + timeline views)
 │   │   └── theme-provider.tsx          # next-themes wrapper
 │   ├── hooks/
+│   │   ├── use-data-fetching.ts       # Central data fetching (status, recordings, devices polling)
+│   │   ├── use-audio-context.ts       # AudioContext/HTMLAudioElement refs
+│   │   ├── use-listening.ts           # Live audio listening, reconnection, test tone
+│   │   ├── use-recording.ts           # Server-side recording state and toggle
+│   │   ├── use-talkback.ts            # Push-to-talk talkback (WebSocket, AudioWorklet)
+│   │   ├── use-client-recording.ts    # Browser-side recording (MediaRecorder, upload)
+│   │   ├── use-vox.ts                 # VOX config and toggle
+│   │   ├── use-compressor.ts          # Compressor config and debounced save
+│   │   ├── use-devices.ts             # Device selection, mixer, bitrate settings
+│   │   ├── use-recordings-list.ts     # Recordings list UI (filters, playback, delete)
+│   │   ├── use-transcription.ts       # Transcription state, polling, trigger
+│   │   ├── use-keyboard-shortcuts.ts  # Global keyboard shortcut handler
 │   │   └── use-local-storage.ts       # Generic localStorage hook (SSR-safe)
 │   └── lib/
 │       ├── utils.ts                    # cn() helper
@@ -313,7 +334,7 @@ auris/
 
 | File | What to change |
 |---|---|
-| `/etc/default/auris` | `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH` |
+| `/etc/default/auris` | `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`, `COMPRESSOR_*` |
 | `.env.local` | `RECORDINGS_DIR`, `DATABASE_PATH`, `NEXT_PUBLIC_STREAM_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST`, `NEXTAUTH_URL`, `WHISPER_BIN`, `WHISPER_MODEL`, `WHISPER_LANGUAGE` (see `.env.example`) |
 | `system/icecast.xml` | Passwords (auto-generated by `setup.sh`), listen address |
 | `system/nginx-auris.conf` | `server_name` hostname (default: `_` catch-all) |

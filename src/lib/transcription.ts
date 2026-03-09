@@ -1,16 +1,23 @@
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { getWhisperLanguage } from "@/lib/device-config";
 
 const WHISPER_BIN = process.env.WHISPER_BIN || "whisper-cpp";
 const WHISPER_MODEL = process.env.WHISPER_MODEL || "/opt/whisper.cpp/models/ggml-medium.bin";
 
+export interface TranscriptionSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
 interface TranscriptionResult {
   text: string;
+  segments: TranscriptionSegment[];
   language: string;
 }
 
 /** Run whisper.cpp on an audio file and return transcription text + language */
-function runWhisper(audioPath: string, options?: { language?: string; model?: string }): Promise<TranscriptionResult> {
+function runWhisper(audioPath: string, options?: { language?: string; model?: string; onProgress?: (pct: number) => void; signal?: AbortSignal }): Promise<TranscriptionResult> {
   const model = options?.model || WHISPER_MODEL;
   const lang = options?.language || "auto";
 
@@ -18,18 +25,39 @@ function runWhisper(audioPath: string, options?: { language?: string; model?: st
     const args = [
       "-m", model,
       "-f", audioPath,
-      "--no-timestamps",
+      "--print-progress",
     ];
     if (lang !== "auto") {
       args.push("-l", lang);
     }
 
     const proc = spawn(WHISPER_BIN, args);
+
+    // Handle abort signal — kill whisper process
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        proc.kill("SIGTERM");
+        reject(new Error("Transcription cancelled"));
+        return;
+      }
+      const onAbort = () => { proc.kill("SIGTERM"); };
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      proc.on("close", () => options!.signal!.removeEventListener("abort", onAbort));
+    }
+
     const chunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
 
     proc.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-    proc.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+      // Parse progress from stderr: "whisper_print_progress_callback: progress = XX%"
+      const text = chunk.toString();
+      const match = text.match(/progress\s*=\s*(\d+)%/);
+      if (match && options?.onProgress) {
+        options.onProgress(parseInt(match[1], 10));
+      }
+    });
 
     proc.on("close", (code) => {
       if (code !== 0) {
@@ -37,7 +65,7 @@ function runWhisper(audioPath: string, options?: { language?: string; model?: st
         reject(new Error(`whisper-cpp exited with code ${code}: ${stderr.slice(0, 500)}`));
         return;
       }
-      const text = Buffer.concat(chunks).toString().trim();
+      const stdout = Buffer.concat(chunks).toString().trim();
       const stderr = Buffer.concat(stderrChunks).toString();
 
       // Extract detected language from stderr (whisper.cpp prints "auto-detected language: xx")
@@ -45,7 +73,8 @@ function runWhisper(audioPath: string, options?: { language?: string; model?: st
       const langMatch = stderr.match(/auto-detected language:\s*(\w+)/i);
       if (langMatch) detectedLang = langMatch[1];
 
-      resolve({ text, language: detectedLang });
+      const { text, segments } = parseTimestampedOutput(stdout);
+      resolve({ text, segments, language: detectedLang });
     });
 
     proc.on("error", (err) => {
@@ -58,10 +87,63 @@ function runWhisper(audioPath: string, options?: { language?: string; model?: st
   });
 }
 
+/** Parse a timestamp like "00:00:05.120" into seconds */
+function parseTimestamp(ts: string): number {
+  const parts = ts.split(":");
+  const hours = parseInt(parts[0], 10);
+  const minutes = parseInt(parts[1], 10);
+  const seconds = parseFloat(parts[2]);
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+/** Parse whisper.cpp timestamped output: `[00:00:00.000 --> 00:00:05.120]  text` */
+function parseTimestampedOutput(output: string): { text: string; segments: TranscriptionSegment[] } {
+  const segments: TranscriptionSegment[] = [];
+  const textParts: string[] = [];
+  const lineRegex = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\]\s*(.*)$/;
+
+  for (const line of output.split("\n")) {
+    const match = line.match(lineRegex);
+    if (match) {
+      const segText = match[3].trim();
+      segments.push({
+        start: parseTimestamp(match[1]),
+        end: parseTimestamp(match[2]),
+        text: segText,
+      });
+      if (segText) textParts.push(segText);
+    }
+  }
+
+  // Fallback: if no timestamps parsed, treat whole output as plain text
+  if (segments.length === 0) {
+    return { text: output, segments: [] };
+  }
+
+  return { text: textParts.join(" "), segments };
+}
+
+/** Parse stored transcription (JSON with segments or legacy plain text) */
+export function parseStoredTranscription(raw: string | null): {
+  text: string;
+  segments: TranscriptionSegment[] | null;
+} {
+  if (!raw) return { text: "", segments: null };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.segments)) {
+      return { text: parsed.text || "", segments: parsed.segments };
+    }
+  } catch {
+    // Not JSON — legacy plain text
+  }
+  return { text: raw, segments: null };
+}
+
 /** Generate transcription for an audio file (MP3, WAV, FLAC, OGG supported) */
 export async function generateTranscription(
   audioPath: string,
-  options?: { language?: string; model?: string }
+  options?: { language?: string; model?: string; onProgress?: (pct: number) => void; signal?: AbortSignal }
 ): Promise<TranscriptionResult> {
   // Read language from config if not explicitly provided
   if (!options?.language) {
@@ -79,9 +161,16 @@ type QueueItem = {
   reject: (err: unknown) => void;
 };
 
-const _global = globalThis as unknown as { _transcriptionQueue?: QueueItem[]; _transcriptionRunning?: boolean };
+const _global = globalThis as unknown as {
+  _transcriptionQueue?: QueueItem[];
+  _transcriptionRunning?: boolean;
+  _transcriptionProgress?: Map<string, number>;
+  _transcriptionAbort?: Map<string, AbortController>;
+};
 if (!_global._transcriptionQueue) _global._transcriptionQueue = [];
 if (!_global._transcriptionRunning) _global._transcriptionRunning = false;
+if (!_global._transcriptionProgress) _global._transcriptionProgress = new Map();
+if (!_global._transcriptionAbort) _global._transcriptionAbort = new Map();
 
 async function processQueue(): Promise<void> {
   if (_global._transcriptionRunning) return;
@@ -98,6 +187,42 @@ async function processQueue(): Promise<void> {
   }
 
   _global._transcriptionRunning = false;
+}
+
+/** Get transcription progress (0–100) for a filename, or null if not actively transcribing */
+export function getTranscriptionProgress(filename: string): number | null {
+  return _global._transcriptionProgress!.get(filename) ?? null;
+}
+
+/** Set transcription progress for a filename */
+export function setTranscriptionProgress(filename: string, progress: number): void {
+  _global._transcriptionProgress!.set(filename, progress);
+}
+
+/** Clear transcription progress for a filename */
+export function clearTranscriptionProgress(filename: string): void {
+  _global._transcriptionProgress!.delete(filename);
+}
+
+/** Create an AbortController for a transcription job and return its signal */
+export function createTranscriptionAbort(filename: string): AbortSignal {
+  // Cancel any existing controller for this file
+  _global._transcriptionAbort!.get(filename)?.abort();
+  const controller = new AbortController();
+  _global._transcriptionAbort!.set(filename, controller);
+  return controller.signal;
+}
+
+/** Cancel an active or queued transcription for a filename. Returns true if something was cancelled. */
+export function cancelTranscription(filename: string): boolean {
+  // Abort active whisper process
+  const controller = _global._transcriptionAbort!.get(filename);
+  if (controller) {
+    controller.abort();
+    _global._transcriptionAbort!.delete(filename);
+  }
+  clearTranscriptionProgress(filename);
+  return !!controller;
 }
 
 /** Enqueue a transcription job. Returns a promise that resolves when the job completes. */
