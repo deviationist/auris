@@ -88,7 +88,7 @@ export async function POST(
 
   setTranscriptionProgress(safe, 0);
   const signal = createTranscriptionAbort(safe);
-  enqueueTranscription(async () => {
+  enqueueTranscription(safe, async () => {
     if (signal.aborted) throw new Error("Transcription cancelled");
     await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, safe));
     const result = await generateTranscription(filePath, {

@@ -195,6 +195,41 @@ export async function setWhisperLanguage(lang: string): Promise<void> {
   await writeConfig(config);
 }
 
+// --- Whisper threads config ---
+
+export async function getWhisperThreads(): Promise<number> {
+  const config = await readConfig();
+  const val = parseInt(config.WHISPER_THREADS, 10);
+  return isNaN(val) || val <= 0 ? 0 : val; // 0 = whisper.cpp default (4)
+}
+
+export async function setWhisperThreads(threads: number): Promise<void> {
+  const config = await readConfig();
+  config.WHISPER_THREADS = threads > 0 ? String(threads) : "";
+  await writeConfig(config);
+}
+
+// --- Whisper VAD config ---
+
+const DEFAULT_VAD_MODEL = "/opt/whisper.cpp/models/ggml-silero-v6.2.0.bin";
+
+export async function getWhisperVad(): Promise<{ enabled: boolean; model: string }> {
+  const config = await readConfig();
+  // Default on — only disabled when explicitly set to "false"
+  const enabled = config.WHISPER_VAD !== "false";
+  const model = config.WHISPER_VAD_MODEL || DEFAULT_VAD_MODEL;
+  return { enabled, model };
+}
+
+export async function setWhisperVad(enabled: boolean, model?: string): Promise<void> {
+  const config = await readConfig();
+  config.WHISPER_VAD = enabled ? "true" : "false";
+  if (model !== undefined) {
+    config.WHISPER_VAD_MODEL = model;
+  }
+  await writeConfig(config);
+}
+
 // --- Compressor config ---
 
 export interface CompressorConfig {

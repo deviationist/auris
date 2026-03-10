@@ -424,7 +424,7 @@ async function finalizeRecording(instance: VoxInstance): Promise<void> {
     // Fire-and-forget transcription
     setTranscriptionProgress(filename, 0);
     const signal = createTranscriptionAbort(filename);
-    enqueueTranscription(async () => {
+    enqueueTranscription(filename, async () => {
       if (signal.aborted) throw new Error("Transcription cancelled");
       await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, filename));
       const result = await generateTranscription(mp3Path, { onProgress: (pct) => setTranscriptionProgress(filename, pct), signal });

@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
     // Fire-and-forget transcription (queued, serial)
     setTranscriptionProgress(filename, 0);
     const signal = createTranscriptionAbort(filename);
-    enqueueTranscription(async () => {
+    enqueueTranscription(filename, async () => {
       if (signal.aborted) throw new Error("Transcription cancelled");
       const { eq } = await import("drizzle-orm");
       await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, filename));

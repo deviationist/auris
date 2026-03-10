@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Recording, TranscriptionData } from "@/types/dashboard";
 
@@ -29,29 +29,36 @@ export function useTranscription({
   }, [recordings]);
 
   // Poll transcription progress
+  const pollingRef = useRef(false);
   useEffect(() => {
     if (transcribingFiles.size === 0) return;
     const interval = setInterval(async () => {
-      for (const filename of transcribingFiles) {
-        try {
-          const res = await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription`);
-          if (!res.ok) continue;
-          const data = await res.json();
-          if (data.status === "done" && data.transcription) {
-            setTranscriptions((prev) => ({ ...prev, [filename]: { text: data.transcription, segments: data.segments ?? null, language: data.language } }));
-            setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
-            setTranscriptionProgress((prev) => { const next = { ...prev }; delete next[filename]; return next; });
-            setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "done" as const } : r) ?? null);
-          } else if (data.status === "error") {
-            setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
-            setTranscriptionProgress((prev) => { const next = { ...prev }; delete next[filename]; return next; });
-            setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "error" as const } : r) ?? null);
-          } else if (data.progress != null) {
-            setTranscriptionProgress((prev) => ({ ...prev, [filename]: data.progress }));
-          }
-        } catch {}
+      if (pollingRef.current) return;
+      pollingRef.current = true;
+      try {
+        for (const filename of transcribingFiles) {
+          try {
+            const res = await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription`);
+            if (!res.ok) continue;
+            const data = await res.json();
+            if (data.status === "done" && data.transcription) {
+              setTranscriptions((prev) => ({ ...prev, [filename]: { text: data.transcription, segments: data.segments ?? null, language: data.language } }));
+              setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
+              setTranscriptionProgress((prev) => { const next = { ...prev }; delete next[filename]; return next; });
+              setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "done" as const } : r) ?? null);
+            } else if (data.status === "error") {
+              setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
+              setTranscriptionProgress((prev) => { const next = { ...prev }; delete next[filename]; return next; });
+              setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "error" as const } : r) ?? null);
+            } else if (data.progress != null) {
+              setTranscriptionProgress((prev) => ({ ...prev, [filename]: data.progress }));
+            }
+          } catch {}
+        }
+      } finally {
+        pollingRef.current = false;
       }
-    }, 3000);
+    }, 1500);
     return () => clearInterval(interval);
   }, [transcribingFiles, setRecordings]);
 

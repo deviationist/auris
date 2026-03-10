@@ -51,6 +51,7 @@ Recording start ensures `auris-stream` is running first (since `auris-record` re
 | `src/components/recording-row.tsx` | Single recording table row (inline edit, actions, expanded player) |
 | `src/components/recording-expanded.tsx` | Expanded recording view (waveform player, transcription panel) |
 | `src/components/transcription-panel.tsx` | Transcription display with prose and timeline views |
+| `src/components/transcription-queue-dialog.tsx` | Transcription queue dialog (active job + pending, 1s poll) |
 | `src/contexts/dashboard-context.tsx` | Dashboard context provider (composes domain hooks) |
 | `src/hooks/use-data-fetching.ts` | Central data fetching (status, recordings, devices, mixers polling) |
 | `src/hooks/use-audio-context.ts` | AudioContext/HTMLAudioElement refs and auto-resume |
@@ -120,7 +121,7 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - UI components from `src/components/ui/` (shadcn/ui — do not edit directly)
 - Audio encoding: MP3 128kbps, 44.1kHz, mono everywhere
 - Icecast mount: `/mic` (source password from `ICECAST_SOURCE_PASSWORD` in `/etc/default/auris`)
-- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`, `COMPRESSOR_ENABLED`, `COMPRESSOR_THRESHOLD`, `COMPRESSOR_RATIO`, `COMPRESSOR_MAKEUP`, `COMPRESSOR_ATTACK`, `COMPRESSOR_RELEASE`
+- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`, `COMPRESSOR_ENABLED`, `COMPRESSOR_THRESHOLD`, `COMPRESSOR_RATIO`, `COMPRESSOR_MAKEUP`, `COMPRESSOR_ATTACK`, `COMPRESSOR_RELEASE`, `WHISPER_THREADS`, `WHISPER_VAD`, `WHISPER_VAD_MODEL`
 - Server playback and talkback both use `globalThis` singletons to survive HMR in dev mode and share state with API routes
 - Server playback and talkback are mutually exclusive (talkback takes priority)
 - Voice effects (pitch shift, echo, chorus, flanger, vibrato, tempo, autotune) apply to both talkback and client recordings via ffmpeg filters (`buildFilterChain` in `talkback-effects.ts`)

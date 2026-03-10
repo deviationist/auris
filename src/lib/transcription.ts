@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "child_process";
-import { getWhisperLanguage } from "@/lib/device-config";
+import { getWhisperLanguage, getWhisperThreads, getWhisperVad } from "@/lib/device-config";
 
 const WHISPER_BIN = process.env.WHISPER_BIN || "whisper-cpp";
 const WHISPER_MODEL = process.env.WHISPER_MODEL || "/opt/whisper.cpp/models/ggml-medium.bin";
@@ -17,9 +17,10 @@ interface TranscriptionResult {
 }
 
 /** Run whisper.cpp on an audio file and return transcription text + language */
-function runWhisper(audioPath: string, options?: { language?: string; model?: string; onProgress?: (pct: number) => void; signal?: AbortSignal }): Promise<TranscriptionResult> {
+function runWhisper(audioPath: string, options?: { language?: string; model?: string; threads?: number; vad?: boolean; vadModel?: string; onProgress?: (pct: number) => void; signal?: AbortSignal }): Promise<TranscriptionResult> {
   const model = options?.model || WHISPER_MODEL;
   const lang = options?.language || "auto";
+  const threads = options?.threads;
 
   return new Promise((resolve, reject) => {
     const args = [
@@ -30,17 +31,35 @@ function runWhisper(audioPath: string, options?: { language?: string; model?: st
     if (lang !== "auto") {
       args.push("-l", lang);
     }
+    if (threads && threads > 0) {
+      args.push("-t", String(threads));
+    }
+    if (options?.vad) {
+      args.push("--vad");
+      if (options.vadModel) {
+        args.push("-vm", options.vadModel);
+      }
+    }
 
-    const proc = spawn(WHISPER_BIN, args);
+    const proc = spawn(WHISPER_BIN, args, { detached: false });
+
+    // Force-kill helper: SIGTERM first, SIGKILL after 2s if still alive
+    const forceKill = () => {
+      proc.kill("SIGTERM");
+      const killTimer = setTimeout(() => {
+        try { proc.kill("SIGKILL"); } catch {}
+      }, 2000);
+      proc.on("close", () => clearTimeout(killTimer));
+    };
 
     // Handle abort signal — kill whisper process
     if (options?.signal) {
       if (options.signal.aborted) {
-        proc.kill("SIGTERM");
+        forceKill();
         reject(new Error("Transcription cancelled"));
         return;
       }
-      const onAbort = () => { proc.kill("SIGTERM"); };
+      const onAbort = () => { forceKill(); };
       options.signal.addEventListener("abort", onAbort, { once: true });
       proc.on("close", () => options!.signal!.removeEventListener("abort", onAbort));
     }
@@ -143,12 +162,24 @@ export function parseStoredTranscription(raw: string | null): {
 /** Generate transcription for an audio file (MP3, WAV, FLAC, OGG supported) */
 export async function generateTranscription(
   audioPath: string,
-  options?: { language?: string; model?: string; onProgress?: (pct: number) => void; signal?: AbortSignal }
+  options?: { language?: string; model?: string; threads?: number; vad?: boolean; vadModel?: string; onProgress?: (pct: number) => void; signal?: AbortSignal }
 ): Promise<TranscriptionResult> {
   // Read language from config if not explicitly provided
   if (!options?.language) {
     const configLang = await getWhisperLanguage();
     options = { ...options, language: configLang };
+  }
+  // Read threads from config if not explicitly provided
+  if (!options?.threads) {
+    const configThreads = await getWhisperThreads();
+    if (configThreads > 0) {
+      options = { ...options, threads: configThreads };
+    }
+  }
+  // Read VAD from config if not explicitly provided
+  if (options?.vad === undefined) {
+    const vadConfig = await getWhisperVad();
+    options = { ...options, vad: vadConfig.enabled, vadModel: vadConfig.model };
   }
 
   return runWhisper(audioPath, options);
@@ -156,6 +187,7 @@ export async function generateTranscription(
 
 // Serial queue — one transcription at a time to avoid CPU overload
 type QueueItem = {
+  filename: string;
   fn: () => Promise<void>;
   resolve: () => void;
   reject: (err: unknown) => void;
@@ -166,11 +198,13 @@ const _global = globalThis as unknown as {
   _transcriptionRunning?: boolean;
   _transcriptionProgress?: Map<string, number>;
   _transcriptionAbort?: Map<string, AbortController>;
+  _transcriptionActive?: string | null;
 };
 if (!_global._transcriptionQueue) _global._transcriptionQueue = [];
 if (!_global._transcriptionRunning) _global._transcriptionRunning = false;
 if (!_global._transcriptionProgress) _global._transcriptionProgress = new Map();
 if (!_global._transcriptionAbort) _global._transcriptionAbort = new Map();
+if (_global._transcriptionActive === undefined) _global._transcriptionActive = null;
 
 async function processQueue(): Promise<void> {
   if (_global._transcriptionRunning) return;
@@ -178,6 +212,7 @@ async function processQueue(): Promise<void> {
 
   while (_global._transcriptionQueue!.length > 0) {
     const item = _global._transcriptionQueue!.shift()!;
+    _global._transcriptionActive = item.filename;
     try {
       await item.fn();
       item.resolve();
@@ -186,6 +221,7 @@ async function processQueue(): Promise<void> {
     }
   }
 
+  _global._transcriptionActive = null;
   _global._transcriptionRunning = false;
 }
 
@@ -226,9 +262,21 @@ export function cancelTranscription(filename: string): boolean {
 }
 
 /** Enqueue a transcription job. Returns a promise that resolves when the job completes. */
-export function enqueueTranscription(fn: () => Promise<void>): Promise<void> {
+export function enqueueTranscription(filename: string, fn: () => Promise<void>): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    _global._transcriptionQueue!.push({ fn, resolve, reject });
+    _global._transcriptionQueue!.push({ filename, fn, resolve, reject });
     processQueue();
   });
+}
+
+/** Get the current transcription queue status */
+export function getTranscriptionQueueStatus(): {
+  active: { filename: string; progress: number | null } | null;
+  pending: string[];
+} {
+  const active = _global._transcriptionActive
+    ? { filename: _global._transcriptionActive, progress: getTranscriptionProgress(_global._transcriptionActive) }
+    : null;
+  const pending = _global._transcriptionQueue!.map((item) => item.filename);
+  return { active, pending };
 }

@@ -5,6 +5,7 @@ import { useTheme } from "next-themes";
 import {
   AudioLines,
   ChevronDown,
+  Languages,
   Keyboard,
   Loader2,
   LogOut,
@@ -38,6 +39,7 @@ import { CardRecording } from "@/components/card-recording";
 import { CardMonitor } from "@/components/card-monitor";
 import { CardTalkback } from "@/components/card-talkback";
 import { CardRecordingsTable } from "@/components/card-recordings-table";
+import { TranscriptionQueueDialog } from "@/components/transcription-queue-dialog";
 
 export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   return (
@@ -58,7 +60,9 @@ function DashboardContent({ authEnabled }: { authEnabled: boolean }) {
     mixerOpen,
     setMixerOpen,
     updateMixer,
+    transcribingFiles,
   } = useDashboard();
+  const [queueDialogOpen, setQueueDialogOpen] = React.useState(false);
 
   return (
     <main id="main" className="min-h-screen bg-background p-6 md:p-10">
@@ -71,6 +75,24 @@ function DashboardContent({ authEnabled }: { authEnabled: boolean }) {
             Remote Audio Console
           </span>
           <div className="ml-auto flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={transcribingFiles.size > 0 ? `Transcription queue (${transcribingFiles.size} active)` : "Transcription queue"}
+                  className="relative"
+                  onClick={() => setQueueDialogOpen(true)}
+                >
+                  <Languages className="h-5 w-5" />
+                  {transcribingFiles.size > 0 && (
+                    <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary animate-pulse" aria-hidden="true" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Transcription queue</TooltipContent>
+            </Tooltip>
+            <TranscriptionQueueDialog open={queueDialogOpen} onOpenChange={setQueueDialogOpen} />
             <span className="hidden [@media(pointer:fine)]:contents">
               <Tooltip>
                 <TooltipTrigger asChild>

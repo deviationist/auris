@@ -28,6 +28,8 @@ export function useDataFetching() {
   const setServerPlayingFileRef = useRef<React.Dispatch<React.SetStateAction<string | null>> | null>(null);
 
   const statusAbortRef = useRef<AbortController | null>(null);
+  const recordingsPollingRef = useRef(false);
+  const mixersPollingRef = useRef(false);
 
   const fetchStatus = useCallback(async () => {
     statusAbortRef.current?.abort();
@@ -51,6 +53,8 @@ export function useDataFetching() {
   }, []);
 
   const fetchRecordings = useCallback(async () => {
+    if (recordingsPollingRef.current) return null;
+    recordingsPollingRef.current = true;
     try {
       const res = await fetch("/api/recordings");
       if (res.ok) {
@@ -58,15 +62,21 @@ export function useDataFetching() {
         setRecordings(recs);
         return recs;
       }
-    } catch {}
+    } catch {} finally {
+      recordingsPollingRef.current = false;
+    }
     return null;
   }, []);
 
   const fetchAllMixers = useCallback(async () => {
+    if (mixersPollingRef.current) return;
+    mixersPollingRef.current = true;
     try {
       const res = await fetch("/api/audio/mixer/all");
       if (res.ok) setCardMixers(await res.json());
-    } catch {}
+    } catch {} finally {
+      mixersPollingRef.current = false;
+    }
   }, []);
 
   const fetchDevices = useCallback(async () => {

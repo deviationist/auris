@@ -130,7 +130,7 @@ export async function stopRecording(): Promise<number> {
         // Fire-and-forget transcription (queued, serial)
         setTranscriptionProgress(activeFile, 0);
         const signal = createTranscriptionAbort(activeFile);
-        enqueueTranscription(async () => {
+        enqueueTranscription(activeFile, async () => {
           if (signal.aborted) throw new Error("Transcription cancelled");
           await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, activeFile));
           const result = await generateTranscription(filePath, { onProgress: (pct) => setTranscriptionProgress(activeFile, pct), signal });
