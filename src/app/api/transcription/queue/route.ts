@@ -10,7 +10,7 @@ export async function GET() {
   // Look up display names for all filenames in the queue
   const allFilenames = [
     ...(status.active ? [status.active.filename] : []),
-    ...status.pending,
+    ...status.pending.map((p) => p.filename),
   ];
 
   const nameMap: Record<string, string> = {};

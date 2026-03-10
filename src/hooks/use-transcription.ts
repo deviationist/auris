@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Recording, TranscriptionData } from "@/types/dashboard";
 
+function displayName(recordings: Recording[] | null, filename: string): string {
+  const rec = recordings?.find((r) => r.filename === filename);
+  return rec?.name || filename;
+}
+
 export function useTranscription({
   recordings, setRecordings, fetchRecordings,
 }: {
@@ -46,10 +51,12 @@ export function useTranscription({
               setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
               setTranscriptionProgress((prev) => { const next = { ...prev }; delete next[filename]; return next; });
               setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "done" as const } : r) ?? null);
+              toast.success(`Transcription complete: ${displayName(recordings, filename)}`);
             } else if (data.status === "error") {
               setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
               setTranscriptionProgress((prev) => { const next = { ...prev }; delete next[filename]; return next; });
               setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "error" as const } : r) ?? null);
+              toast.error(`Transcription failed: ${displayName(recordings, filename)}`);
             } else if (data.progress != null) {
               setTranscriptionProgress((prev) => ({ ...prev, [filename]: data.progress }));
             }
@@ -84,6 +91,7 @@ export function useTranscription({
         setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
         return;
       }
+      toast.info(`Transcription started: ${displayName(recordings, filename)}`);
       setTimeout(() => fetchTranscription(filename), 3000);
     } catch {
       toast.error("Failed to start transcription");
@@ -95,6 +103,7 @@ export function useTranscription({
     try { await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription?cancel=1`, { method: "DELETE" }); } catch {}
     setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
     setTranscriptionProgress((prev) => { const next = { ...prev }; delete next[filename]; return next; });
+    toast.info(`Transcription cancelled: ${displayName(recordings, filename)}`);
     fetchRecordings();
   }
 

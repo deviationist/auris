@@ -10,12 +10,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { WHISPER_LANGUAGES } from "@/lib/whisper-languages";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { LanguageSearchList } from "@/components/language-picker";
 import type { TranscriptionData } from "@/types/dashboard";
 
 function formatTimestamp(seconds: number): string {
@@ -45,6 +44,7 @@ export function TranscriptionPanel({
   const activeIndexRef = useRef(-1);
   const rafRef = useRef(0);
   const [view, setView] = useState<"prose" | "timeline">("prose");
+  const [retranscribeOpen, setRetranscribeOpen] = useState(false);
 
   useEffect(() => { onLoad(); }, [filename]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -141,10 +141,10 @@ export function TranscriptionPanel({
             </TooltipTrigger>
             <TooltipContent>Copy</TooltipContent>
           </Tooltip>
-          <DropdownMenu>
+          <Popover open={retranscribeOpen} onOpenChange={setRetranscribeOpen}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
+                <PopoverTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
@@ -154,26 +154,31 @@ export function TranscriptionPanel({
                   >
                     {transcribing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
                   </Button>
-                </DropdownMenuTrigger>
+                </PopoverTrigger>
               </TooltipTrigger>
               <TooltipContent>Re-transcribe</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onRetranscribe()}>
-                <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                Re-transcribe
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onRetranscribe()} disabled className="text-xs text-muted-foreground px-2 py-1 pointer-events-none">
-                <Languages className="h-3.5 w-3.5" aria-hidden="true" />
-                Re-transcribe as...
-              </DropdownMenuItem>
-              {WHISPER_LANGUAGES.filter((l) => l.code !== "auto").map((lang) => (
-                <DropdownMenuItem key={lang.code} onClick={() => onRetranscribe(lang.code)} className="pl-8">
-                  {lang.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            <PopoverContent className="w-[220px] p-0" align="end">
+              <div className="p-2 border-b">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start"
+                  onClick={() => { setRetranscribeOpen(false); onRetranscribe(); }}
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-2" aria-hidden="true" />
+                  Re-transcribe
+                </Button>
+              </div>
+              <div className="px-2 pt-3 pb-1.5">
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5 px-2 mb-1">
+                  <Languages className="h-3 w-3" aria-hidden="true" />
+                  Re-transcribe as...
+                </p>
+              </div>
+              <LanguageSearchList onSelect={(code) => { setRetranscribeOpen(false); onRetranscribe(code); }} />
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
       <div ref={containerRef} className="text-sm leading-relaxed bg-muted/50 rounded p-2 max-h-40 overflow-y-auto overflow-x-hidden">

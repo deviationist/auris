@@ -42,15 +42,17 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { RecordingExpanded } from "@/components/recording-expanded";
 import { formatBytes, formatDate, formatDuration } from "@/lib/format";
 import { useDashboard } from "@/contexts/dashboard-context";
-import { WHISPER_LANGUAGES } from "@/lib/whisper-languages";
+import { LanguageSearchList } from "@/components/language-picker";
 import type { Recording } from "@/types/dashboard";
 
 export function RecordingRow({
@@ -252,19 +254,17 @@ export function RecordingRow({
                       {rec.transcriptionStatus === "done" ? "Show transcription" : "Transcribe"}
                     </DropdownMenuItem>
                     {rec.transcriptionStatus !== "done" && (
-                      <DropdownMenuSub>
-                        <DropdownMenuSubTrigger disabled={isActive}>
-                          <Languages className="h-4 w-4" aria-hidden="true" />
-                          Transcribe as...
-                        </DropdownMenuSubTrigger>
-                        <DropdownMenuSubContent className="max-h-60 overflow-y-auto">
-                          {WHISPER_LANGUAGES.filter((l) => l.code !== "auto").map((lang) => (
-                            <DropdownMenuItem key={lang.code} onClick={() => triggerTranscription(rec.filename, lang.code)}>
-                              {lang.name}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuSubContent>
-                      </DropdownMenuSub>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <DropdownMenuItem disabled={isActive} onSelect={(e) => e.preventDefault()}>
+                            <Languages className="h-4 w-4" aria-hidden="true" />
+                            Transcribe as...
+                          </DropdownMenuItem>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[220px] p-0" side="left" align="start">
+                          <LanguageSearchList onSelect={(code) => triggerTranscription(rec.filename, code)} />
+                        </PopoverContent>
+                      </Popover>
                     )}
                   </>
                 )}

@@ -51,7 +51,8 @@ Recording start ensures `auris-stream` is running first (since `auris-record` re
 | `src/components/recording-row.tsx` | Single recording table row (inline edit, actions, expanded player) |
 | `src/components/recording-expanded.tsx` | Expanded recording view (waveform player, transcription panel) |
 | `src/components/transcription-panel.tsx` | Transcription display with prose and timeline views |
-| `src/components/transcription-dialog.tsx` | Transcription dialog (language settings, queue with active job + pending, 1s poll) |
+| `src/components/transcription-dialog.tsx` | Transcription dialog (language settings, translate toggle, queue with active job + pending, 1s poll) |
+| `src/components/language-picker.tsx` | Shared language selection components (searchable combobox, inline search list, name resolver) |
 | `src/contexts/dashboard-context.tsx` | Dashboard context provider (composes domain hooks) |
 | `src/hooks/use-data-fetching.ts` | Central data fetching (status, recordings, devices, mixers polling) |
 | `src/hooks/use-audio-context.ts` | AudioContext/HTMLAudioElement refs and auto-resume |
@@ -122,7 +123,7 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - UI components from `src/components/ui/` (shadcn/ui — do not edit directly)
 - Audio encoding: MP3 128kbps, 44.1kHz, mono everywhere
 - Icecast mount: `/mic` (source password from `ICECAST_SOURCE_PASSWORD` in `/etc/default/auris`)
-- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`, `COMPRESSOR_ENABLED`, `COMPRESSOR_THRESHOLD`, `COMPRESSOR_RATIO`, `COMPRESSOR_MAKEUP`, `COMPRESSOR_ATTACK`, `COMPRESSOR_RELEASE`, `WHISPER_THREADS`, `WHISPER_VAD`, `WHISPER_VAD_MODEL`, `WHISPER_LANGUAGE`
+- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`, `COMPRESSOR_ENABLED`, `COMPRESSOR_THRESHOLD`, `COMPRESSOR_RATIO`, `COMPRESSOR_MAKEUP`, `COMPRESSOR_ATTACK`, `COMPRESSOR_RELEASE`, `WHISPER_THREADS`, `WHISPER_VAD`, `WHISPER_VAD_MODEL`, `WHISPER_LANGUAGE`, `WHISPER_TRANSLATE`
 - Server playback and talkback both use `globalThis` singletons to survive HMR in dev mode and share state with API routes
 - Server playback and talkback are mutually exclusive (talkback takes priority)
 - Voice effects (pitch shift, echo, chorus, flanger, vibrato, tempo, autotune) apply to both talkback and client recordings via ffmpeg filters (`buildFilterChain` in `talkback-effects.ts`)
@@ -144,6 +145,8 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - Transcription uses whisper.cpp (local, offline). Config: `WHISPER_BIN` (default: `whisper-cpp`), `WHISPER_MODEL` (default: `/opt/whisper.cpp/models/ggml-small.bin`), `WHISPER_LANGUAGE` (default: `auto`). Global language setting configurable via Transcription dialog; per-recording language override available via "Transcribe as..." submenu and re-transcribe dropdown.
 - Transcriptions run in a serial queue (`globalThis` singleton) to avoid CPU overload — one at a time
 - Transcription is fire-and-forget after recordings complete (server + client), with on-demand trigger via API/UI
+- Transcription supports `--translate` flag (translate to English) via `WHISPER_TRANSLATE` config toggle in the Transcription dialog
+- Language selection uses shared `LanguageCombobox` (searchable, with cmdk) and `LanguageSearchList` (inline searchable list) from `language-picker.tsx`
 - Transcription panel copy button is view-aware: prose view copies plain text, timeline view copies with timestamps and line breaks
 - Audio compressor (dynamic range compression) is applied in `stream.sh` via ffmpeg `acompressor` filter. Config persisted in `/etc/default/auris`. Toggling or changing settings restarts `auris-stream`. Since recordings use `-c copy` from Icecast, compression propagates to all recordings automatically.
 - Compressor UI lives in the Monitor card settings popover (`card-monitor.tsx`). Config is lazy-loaded on popover open, changes debounce 500ms before API call (stream restart causes brief audio dropout).

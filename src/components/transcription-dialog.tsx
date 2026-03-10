@@ -11,18 +11,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { WHISPER_LANGUAGES } from "@/lib/whisper-languages";
+import { Switch } from "@/components/ui/switch";
+import { LanguageCombobox, languageName } from "@/components/language-picker";
 
 interface QueueStatus {
-  active: { filename: string; progress: number | null } | null;
-  pending: string[];
+  active: { filename: string; progress: number | null; language?: string | null } | null;
+  pending: { filename: string; language?: string }[];
   names: Record<string, string>;
 }
 
@@ -54,6 +48,7 @@ export function TranscriptionDialog({
 }) {
   const [queue, setQueue] = useState<QueueStatus | null>(null);
   const [language, setLanguage] = useState<string | null>(null);
+  const [translate, setTranslate] = useState<boolean>(false);
 
   const fetchingRef = useRef(false);
   const fetchQueue = useCallback(async () => {
@@ -67,11 +62,12 @@ export function TranscriptionDialog({
     }
   }, []);
 
-  // Fetch global language setting once on open
+  // Fetch global settings once on open
   useEffect(() => {
     if (!open) return;
     fetch("/api/transcription").then((res) => res.ok ? res.json() : null).then((data) => {
       if (data?.language) setLanguage(data.language);
+      if (data?.translate !== undefined) setTranslate(data.translate);
     }).catch(() => {});
   }, [open]);
 
@@ -103,6 +99,20 @@ export function TranscriptionDialog({
     }
   };
 
+  const updateTranslate = async (enabled: boolean) => {
+    setTranslate(enabled);
+    try {
+      const res = await fetch("/api/transcription", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ translate: enabled }),
+      });
+      if (!res.ok) toast.error("Failed to update translate setting");
+    } catch {
+      toast.error("Failed to update translate setting");
+    }
+  };
+
   const hasJobs = queue && (queue.active || queue.pending.length > 0);
 
   return (
@@ -116,20 +126,18 @@ export function TranscriptionDialog({
         </DialogHeader>
         <div className="space-y-4">
           {language !== null && (
-            <div className="flex items-center gap-3">
-              <label className="text-sm text-muted-foreground shrink-0">Language</label>
-              <Select value={language} onValueChange={updateLanguage}>
-                <SelectTrigger className="flex-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WHISPER_LANGUAGES.map((lang) => (
-                    <SelectItem key={lang.code} value={lang.code}>
-                      {lang.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <label className="text-sm text-muted-foreground shrink-0">Language</label>
+                <LanguageCombobox value={language} onValueChange={updateLanguage} />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <label className="text-sm text-muted-foreground">Translate to English</label>
+                  <p className="text-xs text-muted-foreground/70">Translates non-English speech to English text</p>
+                </div>
+                <Switch checked={translate} onCheckedChange={updateTranslate} />
+              </div>
             </div>
           )}
           <div className="space-y-3 max-h-80 overflow-y-auto" role="status" aria-live="polite">
@@ -151,6 +159,9 @@ export function TranscriptionDialog({
                       <span className="text-sm font-medium truncate flex-1">
                         {queue.names[queue.active.filename] || queue.active.filename}
                       </span>
+                      {queue.active.language && queue.active.language !== "auto" && (
+                        <span className="text-xs text-muted-foreground shrink-0">{languageName(queue.active.language)}</span>
+                      )}
                       <span className="text-xs font-mono tabular-nums text-muted-foreground shrink-0" aria-hidden="true">
                         {queue.active.progress ?? 0}%
                       </span>
@@ -172,21 +183,24 @@ export function TranscriptionDialog({
                     <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide px-1">
                       Pending ({queue.pending.length})
                     </h3>
-                    {queue.pending.map((filename) => (
+                    {queue.pending.map((item) => (
                       <div
-                        key={filename}
+                        key={item.filename}
                         className="flex items-center gap-2 rounded-lg border px-3 py-2"
                       >
                         <FileAudio className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-hidden="true" />
                         <span className="text-sm truncate flex-1">
-                          {queue.names[filename] || filename}
+                          {queue.names[item.filename] || item.filename}
                         </span>
+                        {item.language && item.language !== "auto" && (
+                          <span className="text-xs text-muted-foreground shrink-0">{languageName(item.language)}</span>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-6 w-6 shrink-0"
-                          onClick={() => cancelTranscription(filename)}
-                          aria-label={`Cancel pending transcription of ${queue.names[filename] || filename}`}
+                          onClick={() => cancelTranscription(item.filename)}
+                          aria-label={`Cancel pending transcription of ${queue.names[item.filename] || item.filename}`}
                         >
                           <X className="h-3.5 w-3.5" />
                         </Button>

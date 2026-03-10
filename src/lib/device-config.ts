@@ -195,6 +195,19 @@ export async function setWhisperLanguage(lang: string): Promise<void> {
   await writeConfig(config);
 }
 
+// --- Whisper translate config ---
+
+export async function getWhisperTranslate(): Promise<boolean> {
+  const config = await readConfig();
+  return config.WHISPER_TRANSLATE === "true";
+}
+
+export async function setWhisperTranslate(enabled: boolean): Promise<void> {
+  const config = await readConfig();
+  config.WHISPER_TRANSLATE = enabled ? "true" : "false";
+  await writeConfig(config);
+}
+
 // --- Whisper threads config ---
 
 export async function getWhisperThreads(): Promise<number> {

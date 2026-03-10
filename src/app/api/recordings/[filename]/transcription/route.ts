@@ -105,7 +105,7 @@ export async function POST(
       transcriptionStatus: "done",
     }).where(eq(recordings.filename, safe));
     clearTranscriptionProgress(safe);
-  }).catch(() => {
+  }, language).catch(() => {
     clearTranscriptionProgress(safe);
     // Don't mark as error if cancelled — the DELETE handler manages the status
     if (!signal.aborted) {

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWhisperLanguage, setWhisperLanguage, getWhisperThreads, setWhisperThreads, getWhisperVad, setWhisperVad } from "@/lib/device-config";
+import { getWhisperLanguage, setWhisperLanguage, getWhisperTranslate, setWhisperTranslate, getWhisperThreads, setWhisperThreads, getWhisperVad, setWhisperVad } from "@/lib/device-config";
 
 export async function GET() {
-  const [language, threads, vad] = await Promise.all([getWhisperLanguage(), getWhisperThreads(), getWhisperVad()]);
-  return NextResponse.json({ language, threads, vad: vad.enabled, vadModel: vad.model });
+  const [language, translate, threads, vad] = await Promise.all([getWhisperLanguage(), getWhisperTranslate(), getWhisperThreads(), getWhisperVad()]);
+  return NextResponse.json({ language, translate, threads, vad: vad.enabled, vadModel: vad.model });
 }
 
 export async function PUT(req: NextRequest) {
@@ -24,10 +24,14 @@ export async function PUT(req: NextRequest) {
     await setWhisperThreads(threads);
   }
 
+  if (body.translate !== undefined) {
+    await setWhisperTranslate(!!body.translate);
+  }
+
   if (body.vad !== undefined) {
     await setWhisperVad(!!body.vad, body.vadModel);
   }
 
-  const [language, threads, vad] = await Promise.all([getWhisperLanguage(), getWhisperThreads(), getWhisperVad()]);
-  return NextResponse.json({ ok: true, language, threads, vad: vad.enabled, vadModel: vad.model });
+  const [language, translate, threads, vad] = await Promise.all([getWhisperLanguage(), getWhisperTranslate(), getWhisperThreads(), getWhisperVad()]);
+  return NextResponse.json({ ok: true, language, translate, threads, vad: vad.enabled, vadModel: vad.model });
 }
