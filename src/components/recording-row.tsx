@@ -44,15 +44,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { RecordingExpanded } from "@/components/recording-expanded";
+import { RetranscribeDialog } from "@/components/retranscribe-dialog";
 import { formatBytes, formatDate, formatDuration } from "@/lib/format";
 import { useDashboard } from "@/contexts/dashboard-context";
-import { LanguageSearchList } from "@/components/language-picker";
 import type { Recording } from "@/types/dashboard";
 
 export function RecordingRow({
@@ -69,8 +64,10 @@ export function RecordingRow({
     playRecording, startServerPlayback, stopServerPlayback,
     saveRecordingName, deleteRecording,
     fetchTranscription, triggerTranscription, cancelTranscriptionFn,
-    playingFile,
+    playingFile, shouldAutoPlay,
   } = useDashboard();
+
+  const [transcribeDialogOpen, setTranscribeDialogOpen] = React.useState(false);
 
   return (
     <React.Fragment>
@@ -239,32 +236,25 @@ export function RecordingRow({
                   </DropdownMenuItem>
                 ) : (
                   <>
-                    <DropdownMenuItem
-                      disabled={isActive}
-                      onClick={() => {
-                        if (rec.transcriptionStatus === "done") {
-                          if (playingFile !== rec.filename) playRecording(rec.filename);
+                    {rec.transcriptionStatus === "done" ? (
+                      <DropdownMenuItem
+                        disabled={isActive}
+                        onClick={() => {
+                          if (playingFile !== rec.filename) playRecording(rec.filename, false);
                           if (!transcriptions[rec.filename]) fetchTranscription(rec.filename);
-                        } else {
-                          triggerTranscription(rec.filename);
-                        }
-                      }}
-                    >
-                      <Languages className="h-4 w-4" aria-hidden="true" />
-                      {rec.transcriptionStatus === "done" ? "Show transcription" : "Transcribe"}
-                    </DropdownMenuItem>
-                    {rec.transcriptionStatus !== "done" && (
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <DropdownMenuItem disabled={isActive} onSelect={(e) => e.preventDefault()}>
-                            <Languages className="h-4 w-4" aria-hidden="true" />
-                            Transcribe as...
-                          </DropdownMenuItem>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[220px] p-0" side="left" align="start">
-                          <LanguageSearchList onSelect={(code) => triggerTranscription(rec.filename, code)} />
-                        </PopoverContent>
-                      </Popover>
+                        }}
+                      >
+                        <Languages className="h-4 w-4" aria-hidden="true" />
+                        Show transcription
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem
+                        disabled={isActive}
+                        onClick={() => setTranscribeDialogOpen(true)}
+                      >
+                        <Languages className="h-4 w-4" aria-hidden="true" />
+                        Transcribe...
+                      </DropdownMenuItem>
                     )}
                   </>
                 )}
@@ -316,6 +306,12 @@ export function RecordingRow({
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+            <RetranscribeDialog
+              open={transcribeDialogOpen}
+              onOpenChange={setTranscribeDialogOpen}
+              onConfirm={(opts) => triggerTranscription(rec.filename, opts)}
+              transcribing={transcribingFiles.has(rec.filename)}
+            />
           </div>
         </TableCell>
       </TableRow>
@@ -324,9 +320,10 @@ export function RecordingRow({
           <TableCell colSpan={6} className="p-3 space-y-3 whitespace-normal">
             <RecordingExpanded
               rec={rec}
+              autoPlay={shouldAutoPlay}
               transcription={transcriptions[rec.filename] ?? null}
               onLoadTranscription={() => { if (!transcriptions[rec.filename]) fetchTranscription(rec.filename); }}
-              onRetranscribe={(lang) => triggerTranscription(rec.filename, lang)}
+              onRetranscribe={(opts) => triggerTranscription(rec.filename, opts)}
               transcribing={transcribingFiles.has(rec.filename)}
             />
           </TableCell>

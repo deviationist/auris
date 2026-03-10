@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { AlignLeft, Copy, FileText, Languages, List, Loader2, RotateCcw } from "lucide-react";
+import { AlignLeft, Copy, FileText, List, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,12 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { LanguageSearchList } from "@/components/language-picker";
+import { RetranscribeDialog } from "@/components/retranscribe-dialog";
 import type { TranscriptionData } from "@/types/dashboard";
 
 function formatTimestamp(seconds: number): string {
@@ -35,7 +30,7 @@ export function TranscriptionPanel({
   filename: string;
   transcription: TranscriptionData | null;
   onLoad: () => void;
-  onRetranscribe: (language?: string) => void;
+  onRetranscribe: (options?: { language?: string; translate?: boolean }) => void;
   transcribing: boolean;
   timeRef?: React.MutableRefObject<number>;
   onSeek?: (time: number) => void;
@@ -141,44 +136,27 @@ export function TranscriptionPanel({
             </TooltipTrigger>
             <TooltipContent>Copy</TooltipContent>
           </Tooltip>
-          <Popover open={retranscribeOpen} onOpenChange={setRetranscribeOpen}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    disabled={transcribing}
-                    aria-label="Re-transcribe"
-                  >
-                    {transcribing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-                  </Button>
-                </PopoverTrigger>
-              </TooltipTrigger>
-              <TooltipContent>Re-transcribe</TooltipContent>
-            </Tooltip>
-            <PopoverContent className="w-[220px] p-0" align="end">
-              <div className="p-2 border-b">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start"
-                  onClick={() => { setRetranscribeOpen(false); onRetranscribe(); }}
-                >
-                  <RotateCcw className="h-3.5 w-3.5 mr-2" aria-hidden="true" />
-                  Re-transcribe
-                </Button>
-              </div>
-              <div className="px-2 pt-3 pb-1.5">
-                <p className="text-xs text-muted-foreground flex items-center gap-1.5 px-2 mb-1">
-                  <Languages className="h-3 w-3" aria-hidden="true" />
-                  Re-transcribe as...
-                </p>
-              </div>
-              <LanguageSearchList onSelect={(code) => { setRetranscribeOpen(false); onRetranscribe(code); }} />
-            </PopoverContent>
-          </Popover>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                disabled={transcribing}
+                onClick={() => setRetranscribeOpen(true)}
+                aria-label="Re-transcribe"
+              >
+                {transcribing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Re-transcribe</TooltipContent>
+          </Tooltip>
+          <RetranscribeDialog
+            open={retranscribeOpen}
+            onOpenChange={setRetranscribeOpen}
+            onConfirm={onRetranscribe}
+            transcribing={transcribing}
+          />
         </div>
       </div>
       <div ref={containerRef} className="text-sm leading-relaxed bg-muted/50 rounded p-2 max-h-40 overflow-y-auto overflow-x-hidden">
@@ -200,10 +178,10 @@ export function TranscriptionPanel({
                 <div
                   key={i}
                   data-seg={i}
-                  className="flex gap-2 rounded px-1 py-0.5 transition-colors duration-150 cursor-pointer hover:bg-primary/10"
+                  className="flex items-baseline gap-2 rounded px-1 py-0.5 transition-colors duration-150 cursor-pointer hover:bg-primary/10"
                   onClick={() => onSeek?.(seg.start)}
                 >
-                  <span className="font-mono text-[11px] text-muted-foreground shrink-0 w-12 pt-px tabular-nums">
+                  <span className="font-mono text-[11px] leading-relaxed text-muted-foreground shrink-0 w-12 tabular-nums">
                     {formatTimestamp(seg.start)}
                   </span>
                   <span>{seg.text}</span>

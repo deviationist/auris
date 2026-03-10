@@ -23,6 +23,7 @@ export function useRecordingsList({
   const sentinelRef = useRef<HTMLDivElement>(null);
 
   const [playingFile, setPlayingFile] = useState<string | null>(null);
+  const [shouldAutoPlay, setShouldAutoPlay] = useState(true);
   const [serverPlayingFile, setServerPlayingFile] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState("");
@@ -61,7 +62,8 @@ export function useRecordingsList({
     return () => observer.disconnect();
   }, [filteredRecordings]);
 
-  function playRecording(filename: string) {
+  function playRecording(filename: string, autoPlay = true) {
+    setShouldAutoPlay(autoPlay);
     setPlayingFile((prev) => prev === filename ? null : filename);
   }
 
@@ -106,7 +108,7 @@ export function useRecordingsList({
     recordingsDateFilter, setRecordingsDateFilter,
     recordingsDeviceFilter, setRecordingsDeviceFilter,
     recordingDevices, filteredRecordings, visibleRecordings, sentinelRef,
-    playingFile, serverPlayingFile, setServerPlayingFile, serverPlaybackPendingRef,
+    playingFile, shouldAutoPlay, serverPlayingFile, setServerPlayingFile, serverPlaybackPendingRef,
     editingName, setEditingName, editingNameValue, setEditingNameValue,
     deletingFile, deleteRecording, saveRecordingName, playRecording,
     startServerPlayback, stopServerPlayback,

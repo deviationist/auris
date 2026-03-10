@@ -8,6 +8,7 @@ import { LevelMeter } from "@/components/level-meter";
 interface WaveformPlayerProps {
   src: string;
   waveformUrl: string;
+  autoPlay?: boolean;
   onTimeUpdate?: (time: number) => void;
   seekRef?: MutableRefObject<((time: number) => void) | null>;
 }
@@ -18,7 +19,7 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function WaveformPlayer({ src, waveformUrl, onTimeUpdate, seekRef }: WaveformPlayerProps) {
+export function WaveformPlayer({ src, waveformUrl, autoPlay = true, onTimeUpdate, seekRef }: WaveformPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -177,7 +178,9 @@ export function WaveformPlayer({ src, waveformUrl, onTimeUpdate, seekRef }: Wave
 
     audio.src = src;
     audio.load();
-    audio.play().then(() => setIsPlaying(true)).catch(() => {});
+    if (autoPlay) {
+      audio.play().then(() => setIsPlaying(true)).catch(() => {});
+    }
 
     const handleEnded = () => {
       setIsPlaying(false);

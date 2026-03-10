@@ -72,11 +72,13 @@ export async function POST(
     return NextResponse.json({ error: "Transcription already in progress" }, { status: 409 });
   }
 
-  // Parse optional language override
+  // Parse optional language/translate overrides
   let language: string | undefined;
+  let translate: boolean | undefined;
   try {
     const body = await req.json();
     if (body.language) language = body.language;
+    if (body.translate !== undefined) translate = !!body.translate;
   } catch {
     // No body or invalid JSON — use default
   }
@@ -93,6 +95,7 @@ export async function POST(
     await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, safe));
     const result = await generateTranscription(filePath, {
       language,
+      translate,
       onProgress: (pct) => setTranscriptionProgress(safe, pct),
       signal,
     });

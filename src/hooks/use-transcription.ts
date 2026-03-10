@@ -20,17 +20,30 @@ export function useTranscription({
   const [transcribingFiles, setTranscribingFiles] = useState<Set<string>>(new Set());
   const [transcriptionProgress, setTranscriptionProgress] = useState<Record<string, number | null>>({});
 
-  // Detect in-progress transcriptions from recordings data
+  // Sync transcribingFiles with recordings data — add in-progress, remove completed
   useEffect(() => {
     if (!recordings) return;
-    const inProgress = recordings.filter((r) => r.transcriptionStatus === "pending" || r.transcriptionStatus === "processing");
-    if (inProgress.length > 0) {
-      setTranscribingFiles((prev) => {
-        const s = new Set(prev);
-        inProgress.forEach((r) => s.add(r.filename));
-        return s;
-      });
-    }
+    const inProgressSet = new Set(
+      recordings
+        .filter((r) => r.transcriptionStatus === "pending" || r.transcriptionStatus === "processing")
+        .map((r) => r.filename)
+    );
+    setTranscribingFiles((prev) => {
+      const next = new Set(prev);
+      // Add any in-progress files not yet tracked
+      for (const f of inProgressSet) next.add(f);
+      // Remove files that are no longer in-progress according to recordings data
+      for (const f of prev) {
+        if (!inProgressSet.has(f)) {
+          const rec = recordings.find((r) => r.filename === f);
+          if (rec && rec.transcriptionStatus !== "pending" && rec.transcriptionStatus !== "processing") {
+            next.delete(f);
+          }
+        }
+      }
+      if (next.size === prev.size && [...next].every((f) => prev.has(f))) return prev;
+      return next;
+    });
   }, [recordings]);
 
   // Poll transcription progress
@@ -46,17 +59,19 @@ export function useTranscription({
             const res = await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription`);
             if (!res.ok) continue;
             const data = await res.json();
-            if (data.status === "done" && data.transcription) {
-              setTranscriptions((prev) => ({ ...prev, [filename]: { text: data.transcription, segments: data.segments ?? null, language: data.language } }));
+            if (data.status === "done") {
+              setTranscriptions((prev) => ({ ...prev, [filename]: { text: data.transcription || "", segments: data.segments ?? null, language: data.language } }));
               setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
               setTranscriptionProgress((prev) => { const next = { ...prev }; delete next[filename]; return next; });
               setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "done" as const } : r) ?? null);
               toast.success(`Transcription complete: ${displayName(recordings, filename)}`);
-            } else if (data.status === "error") {
+            } else if (data.status === "error" || !data.status) {
               setTranscribingFiles((prev) => { const s = new Set(prev); s.delete(filename); return s; });
               setTranscriptionProgress((prev) => { const next = { ...prev }; delete next[filename]; return next; });
-              setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "error" as const } : r) ?? null);
-              toast.error(`Transcription failed: ${displayName(recordings, filename)}`);
+              if (data.status === "error") {
+                setRecordings((prev) => prev?.map((r) => r.filename === filename ? { ...r, transcriptionStatus: "error" as const } : r) ?? null);
+                toast.error(`Transcription failed: ${displayName(recordings, filename)}`);
+              }
             } else if (data.progress != null) {
               setTranscriptionProgress((prev) => ({ ...prev, [filename]: data.progress }));
             }
@@ -78,12 +93,13 @@ export function useTranscription({
     } catch {}
   }
 
-  async function triggerTranscription(filename: string, language?: string) {
+  async function triggerTranscription(filename: string, options?: { language?: string; translate?: boolean }) {
     setTranscribingFiles((prev) => new Set(prev).add(filename));
+    const hasBody = options?.language || options?.translate !== undefined;
     try {
       const res = await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription`, {
         method: "POST",
-        ...(language ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language }) } : {}),
+        ...(hasBody ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: options?.language, translate: options?.translate }) } : {}),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));

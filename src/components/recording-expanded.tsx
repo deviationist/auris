@@ -9,15 +9,17 @@ import type { Recording, TranscriptionData } from "@/types/dashboard";
 
 export function RecordingExpanded({
   rec,
+  autoPlay = true,
   transcription,
   onLoadTranscription,
   onRetranscribe,
   transcribing,
 }: {
   rec: Recording;
+  autoPlay?: boolean;
   transcription: TranscriptionData | null;
   onLoadTranscription: () => void;
-  onRetranscribe: (language?: string) => void;
+  onRetranscribe: (options?: { language?: string; translate?: boolean }) => void;
   transcribing: boolean;
 }) {
   const playbackTimeRef = useRef(0);
@@ -36,6 +38,7 @@ export function RecordingExpanded({
       <WaveformPlayer
         src={`/api/recordings/${encodeURIComponent(rec.filename)}`}
         waveformUrl={`/api/recordings/${encodeURIComponent(rec.filename)}/waveform${rec.waveformHash ? `?v=${rec.waveformHash}` : ""}`}
+        autoPlay={autoPlay}
         onTimeUpdate={handleTimeUpdate}
         seekRef={seekRef}
       />

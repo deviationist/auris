@@ -5,6 +5,7 @@ import { readdir, stat } from "fs/promises";
 import { join } from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { eq, or } from "drizzle-orm";
 import * as schema from "./schema";
 import { recordings } from "./schema";
 
@@ -48,6 +49,20 @@ export async function syncExistingRecordings(): Promise<void> {
   _synced = true;
 
   const db = getDb();
+
+  // Reset orphaned transcriptions stuck in pending/processing from a previous server run
+  try {
+    const stuckRows = await db
+      .select({ filename: recordings.filename, transcription: recordings.transcription })
+      .from(recordings)
+      .where(or(eq(recordings.transcriptionStatus, "pending"), eq(recordings.transcriptionStatus, "processing")));
+    for (const row of stuckRows) {
+      // If there's existing transcription text, revert to "done"; otherwise clear
+      await db.update(recordings).set({
+        transcriptionStatus: row.transcription ? "done" : null,
+      }).where(eq(recordings.filename, row.filename));
+    }
+  } catch {}
 
   try {
     const files = await readdir(RECORDINGS_DIR);

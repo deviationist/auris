@@ -33,8 +33,9 @@ export interface DashboardContextValue {
 
   // Playback
   playingFile: string | null;
+  shouldAutoPlay: boolean;
   serverPlayingFile: string | null;
-  playRecording: (filename: string) => void;
+  playRecording: (filename: string, autoPlay?: boolean) => void;
   startServerPlayback: (filename: string) => void;
   stopServerPlayback: () => void;
 
@@ -52,7 +53,7 @@ export interface DashboardContextValue {
   transcribingFiles: Set<string>;
   transcriptionProgress: Record<string, number | null>;
   fetchTranscription: (filename: string) => void;
-  triggerTranscription: (filename: string, language?: string) => void;
+  triggerTranscription: (filename: string, options?: { language?: string; translate?: boolean }) => void;
   cancelTranscriptionFn: (filename: string) => void;
 
   // Devices & mixer
@@ -194,7 +195,7 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<DashboardContextValue>(() => ({
     mounted: data.mounted, statusLoaded: data.statusLoaded, status: data.status, recordings: data.recordings,
     ...recording,
-    playingFile: recList.playingFile, serverPlayingFile: recList.serverPlayingFile,
+    playingFile: recList.playingFile, shouldAutoPlay: recList.shouldAutoPlay, serverPlayingFile: recList.serverPlayingFile,
     playRecording: recList.playRecording, startServerPlayback: recList.startServerPlayback, stopServerPlayback: recList.stopServerPlayback,
     editingName: recList.editingName, setEditingName: recList.setEditingName,
     editingNameValue: recList.editingNameValue, setEditingNameValue: recList.setEditingNameValue,
