@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { AlignLeft, Copy, FileText, List, Loader2, RotateCcw } from "lucide-react";
+import { AlignLeft, Copy, FileText, Languages, List, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { WHISPER_LANGUAGES } from "@/lib/whisper-languages";
 import type { TranscriptionData } from "@/types/dashboard";
 
 function formatTimestamp(seconds: number): string {
@@ -29,7 +36,7 @@ export function TranscriptionPanel({
   filename: string;
   transcription: TranscriptionData | null;
   onLoad: () => void;
-  onRetranscribe: () => void;
+  onRetranscribe: (language?: string) => void;
   transcribing: boolean;
   timeRef?: React.MutableRefObject<number>;
   onSeek?: (time: number) => void;
@@ -121,7 +128,12 @@ export function TranscriptionPanel({
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6"
-                onClick={() => navigator.clipboard.writeText(transcription.text).then(() => toast.success("Copied to clipboard"))}
+                onClick={() => {
+                  const text = view === "timeline" && transcription.segments?.length
+                    ? transcription.segments.map((seg) => `${formatTimestamp(seg.start)} ${seg.text}`).join("\n")
+                    : transcription.text;
+                  navigator.clipboard.writeText(text).then(() => toast.success("Copied to clipboard"));
+                }}
                 aria-label="Copy transcription"
               >
                 <Copy className="h-3 w-3" />
@@ -129,21 +141,39 @@ export function TranscriptionPanel({
             </TooltipTrigger>
             <TooltipContent>Copy</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={onRetranscribe}
-                disabled={transcribing}
-                aria-label="Re-transcribe"
-              >
-                {transcribing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Re-transcribe</TooltipContent>
-          </Tooltip>
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    disabled={transcribing}
+                    aria-label="Re-transcribe"
+                  >
+                    {transcribing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>Re-transcribe</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onRetranscribe()}>
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                Re-transcribe
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onRetranscribe()} disabled className="text-xs text-muted-foreground px-2 py-1 pointer-events-none">
+                <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+                Re-transcribe as...
+              </DropdownMenuItem>
+              {WHISPER_LANGUAGES.filter((l) => l.code !== "auto").map((lang) => (
+                <DropdownMenuItem key={lang.code} onClick={() => onRetranscribe(lang.code)} className="pl-8">
+                  {lang.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       <div ref={containerRef} className="text-sm leading-relaxed bg-muted/50 rounded p-2 max-h-40 overflow-y-auto overflow-x-hidden">

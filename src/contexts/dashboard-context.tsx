@@ -52,7 +52,7 @@ export interface DashboardContextValue {
   transcribingFiles: Set<string>;
   transcriptionProgress: Record<string, number | null>;
   fetchTranscription: (filename: string) => void;
-  triggerTranscription: (filename: string) => void;
+  triggerTranscription: (filename: string, language?: string) => void;
   cancelTranscriptionFn: (filename: string) => void;
 
   // Devices & mixer

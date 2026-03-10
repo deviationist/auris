@@ -71,10 +71,13 @@ export function useTranscription({
     } catch {}
   }
 
-  async function triggerTranscription(filename: string) {
+  async function triggerTranscription(filename: string, language?: string) {
     setTranscribingFiles((prev) => new Set(prev).add(filename));
     try {
-      const res = await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription`, { method: "POST" });
+      const res = await fetch(`/api/recordings/${encodeURIComponent(filename)}/transcription`, {
+        method: "POST",
+        ...(language ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language }) } : {}),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         toast.error(data.error || "Failed to start transcription");

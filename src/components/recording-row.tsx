@@ -42,11 +42,15 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { RecordingExpanded } from "@/components/recording-expanded";
 import { formatBytes, formatDate, formatDuration } from "@/lib/format";
 import { useDashboard } from "@/contexts/dashboard-context";
+import { WHISPER_LANGUAGES } from "@/lib/whisper-languages";
 import type { Recording } from "@/types/dashboard";
 
 export function RecordingRow({
@@ -232,20 +236,37 @@ export function RecordingRow({
                     Cancel transcription
                   </DropdownMenuItem>
                 ) : (
-                  <DropdownMenuItem
-                    disabled={isActive}
-                    onClick={() => {
-                      if (rec.transcriptionStatus === "done") {
-                        if (playingFile !== rec.filename) playRecording(rec.filename);
-                        if (!transcriptions[rec.filename]) fetchTranscription(rec.filename);
-                      } else {
-                        triggerTranscription(rec.filename);
-                      }
-                    }}
-                  >
-                    <Languages className="h-4 w-4" aria-hidden="true" />
-                    {rec.transcriptionStatus === "done" ? "Show transcription" : "Transcribe"}
-                  </DropdownMenuItem>
+                  <>
+                    <DropdownMenuItem
+                      disabled={isActive}
+                      onClick={() => {
+                        if (rec.transcriptionStatus === "done") {
+                          if (playingFile !== rec.filename) playRecording(rec.filename);
+                          if (!transcriptions[rec.filename]) fetchTranscription(rec.filename);
+                        } else {
+                          triggerTranscription(rec.filename);
+                        }
+                      }}
+                    >
+                      <Languages className="h-4 w-4" aria-hidden="true" />
+                      {rec.transcriptionStatus === "done" ? "Show transcription" : "Transcribe"}
+                    </DropdownMenuItem>
+                    {rec.transcriptionStatus !== "done" && (
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger disabled={isActive}>
+                          <Languages className="h-4 w-4" aria-hidden="true" />
+                          Transcribe as...
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="max-h-60 overflow-y-auto">
+                          {WHISPER_LANGUAGES.filter((l) => l.code !== "auto").map((lang) => (
+                            <DropdownMenuItem key={lang.code} onClick={() => triggerTranscription(rec.filename, lang.code)}>
+                              {lang.name}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
+                    )}
+                  </>
                 )}
                 {isActive ? (
                   <DropdownMenuItem disabled>
@@ -305,7 +326,7 @@ export function RecordingRow({
               rec={rec}
               transcription={transcriptions[rec.filename] ?? null}
               onLoadTranscription={() => { if (!transcriptions[rec.filename]) fetchTranscription(rec.filename); }}
-              onRetranscribe={() => triggerTranscription(rec.filename)}
+              onRetranscribe={(lang) => triggerTranscription(rec.filename, lang)}
               transcribing={transcribingFiles.has(rec.filename)}
             />
           </TableCell>

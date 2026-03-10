@@ -39,7 +39,7 @@ import { CardRecording } from "@/components/card-recording";
 import { CardMonitor } from "@/components/card-monitor";
 import { CardTalkback } from "@/components/card-talkback";
 import { CardRecordingsTable } from "@/components/card-recordings-table";
-import { TranscriptionQueueDialog } from "@/components/transcription-queue-dialog";
+import { TranscriptionDialog } from "@/components/transcription-dialog";
 
 export default function Dashboard({ authEnabled }: { authEnabled: boolean }) {
   return (
@@ -62,7 +62,7 @@ function DashboardContent({ authEnabled }: { authEnabled: boolean }) {
     updateMixer,
     transcribingFiles,
   } = useDashboard();
-  const [queueDialogOpen, setQueueDialogOpen] = React.useState(false);
+  const [transcriptionDialogOpen, setTranscriptionDialogOpen] = React.useState(false);
 
   return (
     <main id="main" className="min-h-screen bg-background p-6 md:p-10">
@@ -80,9 +80,9 @@ function DashboardContent({ authEnabled }: { authEnabled: boolean }) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={transcribingFiles.size > 0 ? `Transcription queue (${transcribingFiles.size} active)` : "Transcription queue"}
+                  aria-label={transcribingFiles.size > 0 ? `Transcription (${transcribingFiles.size} active)` : "Transcription"}
                   className="relative"
-                  onClick={() => setQueueDialogOpen(true)}
+                  onClick={() => setTranscriptionDialogOpen(true)}
                 >
                   <Languages className="h-5 w-5" />
                   {transcribingFiles.size > 0 && (
@@ -90,9 +90,9 @@ function DashboardContent({ authEnabled }: { authEnabled: boolean }) {
                   )}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Transcription queue</TooltipContent>
+              <TooltipContent>Transcription</TooltipContent>
             </Tooltip>
-            <TranscriptionQueueDialog open={queueDialogOpen} onOpenChange={setQueueDialogOpen} />
+            <TranscriptionDialog open={transcriptionDialogOpen} onOpenChange={setTranscriptionDialogOpen} />
             <span className="hidden [@media(pointer:fine)]:contents">
               <Tooltip>
                 <TooltipTrigger asChild>

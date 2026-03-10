@@ -51,7 +51,7 @@ Recording start ensures `auris-stream` is running first (since `auris-record` re
 | `src/components/recording-row.tsx` | Single recording table row (inline edit, actions, expanded player) |
 | `src/components/recording-expanded.tsx` | Expanded recording view (waveform player, transcription panel) |
 | `src/components/transcription-panel.tsx` | Transcription display with prose and timeline views |
-| `src/components/transcription-queue-dialog.tsx` | Transcription queue dialog (active job + pending, 1s poll) |
+| `src/components/transcription-dialog.tsx` | Transcription dialog (language settings, queue with active job + pending, 1s poll) |
 | `src/contexts/dashboard-context.tsx` | Dashboard context provider (composes domain hooks) |
 | `src/hooks/use-data-fetching.ts` | Central data fetching (status, recordings, devices, mixers polling) |
 | `src/hooks/use-audio-context.ts` | AudioContext/HTMLAudioElement refs and auto-resume |
@@ -82,6 +82,7 @@ Recording start ensures `auris-stream` is running first (since `auris-record` re
 | `stream.sh` | ffmpeg ALSA → Icecast streaming script (optional compressor via acompressor filter) |
 | `record.sh` | ffmpeg Icecast → file recording script (-c copy) |
 | `src/lib/transcription.ts` | Whisper.cpp integration: MP3→WAV→transcription with serial queue |
+| `src/lib/whisper-languages.ts` | Static list of whisper-supported languages (code + display name) |
 | `src/lib/stream-idle.ts` | Auto-stop idle audio stream when no Icecast listeners |
 | `scripts/generate-waveforms.mjs` | CLI: generate/clear waveform data in DB |
 | `scripts/generate-transcriptions.mjs` | CLI: generate/clear transcriptions via whisper.cpp |
@@ -121,7 +122,7 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - UI components from `src/components/ui/` (shadcn/ui — do not edit directly)
 - Audio encoding: MP3 128kbps, 44.1kHz, mono everywhere
 - Icecast mount: `/mic` (source password from `ICECAST_SOURCE_PASSWORD` in `/etc/default/auris`)
-- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`, `COMPRESSOR_ENABLED`, `COMPRESSOR_THRESHOLD`, `COMPRESSOR_RATIO`, `COMPRESSOR_MAKEUP`, `COMPRESSOR_ATTACK`, `COMPRESSOR_RELEASE`, `WHISPER_THREADS`, `WHISPER_VAD`, `WHISPER_VAD_MODEL`
+- Config file: `/etc/default/auris` — `ALSA_DEVICE`, `LISTEN_DEVICE`, `PLAYBACK_DEVICE`, `CAPTURE_STREAM`, `CAPTURE_RECORD`, `RECORDINGS_DIR`, `ICECAST_SOURCE_PASSWORD`, `AUTH_USERNAME`, `AUTH_PASSWORD_HASH`, `COMPRESSOR_ENABLED`, `COMPRESSOR_THRESHOLD`, `COMPRESSOR_RATIO`, `COMPRESSOR_MAKEUP`, `COMPRESSOR_ATTACK`, `COMPRESSOR_RELEASE`, `WHISPER_THREADS`, `WHISPER_VAD`, `WHISPER_VAD_MODEL`, `WHISPER_LANGUAGE`
 - Server playback and talkback both use `globalThis` singletons to survive HMR in dev mode and share state with API routes
 - Server playback and talkback are mutually exclusive (talkback takes priority)
 - Voice effects (pitch shift, echo, chorus, flanger, vibrato, tempo, autotune) apply to both talkback and client recordings via ffmpeg filters (`buildFilterChain` in `talkback-effects.ts`)
@@ -140,9 +141,10 @@ Requires Icecast2 running on localhost:8000 for streaming features.
 - Icecast passwords use `%%PLACEHOLDER%%` tokens in `system/icecast.xml`, substituted by `setup.sh` with random values
 - DB path: `DATABASE_PATH` env var or `./data/auris.db` (must be local filesystem, not CIFS/NFS)
 - Recordings dir: `RECORDINGS_DIR` env var or `/recordings`
-- Transcription uses whisper.cpp (local, offline). Config: `WHISPER_BIN` (default: `whisper-cpp`), `WHISPER_MODEL` (default: `/opt/whisper.cpp/models/ggml-small.bin`), `WHISPER_LANGUAGE` (default: `auto`)
+- Transcription uses whisper.cpp (local, offline). Config: `WHISPER_BIN` (default: `whisper-cpp`), `WHISPER_MODEL` (default: `/opt/whisper.cpp/models/ggml-small.bin`), `WHISPER_LANGUAGE` (default: `auto`). Global language setting configurable via Transcription dialog; per-recording language override available via "Transcribe as..." submenu and re-transcribe dropdown.
 - Transcriptions run in a serial queue (`globalThis` singleton) to avoid CPU overload — one at a time
 - Transcription is fire-and-forget after recordings complete (server + client), with on-demand trigger via API/UI
+- Transcription panel copy button is view-aware: prose view copies plain text, timeline view copies with timestamps and line breaks
 - Audio compressor (dynamic range compression) is applied in `stream.sh` via ffmpeg `acompressor` filter. Config persisted in `/etc/default/auris`. Toggling or changing settings restarts `auris-stream`. Since recordings use `-c copy` from Icecast, compression propagates to all recordings automatically.
 - Compressor UI lives in the Monitor card settings popover (`card-monitor.tsx`). Config is lazy-loaded on popover open, changes debounce 500ms before API call (stream restart causes brief audio dropout).
 - Stream idle detection in `src/lib/stream-idle.ts` — auto-stops `auris-stream` when `CAPTURE_STREAM=1`, `CAPTURE_RECORD=0`, and 0 Icecast listeners for 60s

@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { getWhisperLanguage, getWhisperThreads, getWhisperVad } from "@/lib/device-config";
 
 const WHISPER_BIN = process.env.WHISPER_BIN || "whisper-cpp";
-const WHISPER_MODEL = process.env.WHISPER_MODEL || "/opt/whisper.cpp/models/ggml-medium.bin";
+const WHISPER_MODEL = process.env.WHISPER_MODEL || "/opt/whisper.cpp/models/ggml-medium-q5_k.bin";
 
 export interface TranscriptionSegment {
   start: number;
