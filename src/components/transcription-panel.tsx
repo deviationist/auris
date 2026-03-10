@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { useLocalStorage } from "@/hooks/use-local-storage";
 import { AlignLeft, Copy, FileText, List, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ export function TranscriptionPanel({
   onLoad,
   onRetranscribe,
   transcribing,
+  whisperEnabled = true,
   timeRef,
   onSeek,
 }: {
@@ -32,13 +34,14 @@ export function TranscriptionPanel({
   onLoad: () => void;
   onRetranscribe: (options?: { language?: string; translate?: boolean }) => void;
   transcribing: boolean;
+  whisperEnabled?: boolean;
   timeRef?: React.MutableRefObject<number>;
   onSeek?: (time: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const activeIndexRef = useRef(-1);
   const rafRef = useRef(0);
-  const [view, setView] = useState<"prose" | "timeline">("prose");
+  const [view, setView] = useLocalStorage<"prose" | "timeline">("auris:transcription-view", "prose");
   const [retranscribeOpen, setRetranscribeOpen] = useState(false);
 
   useEffect(() => { onLoad(); }, [filename]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -136,27 +139,31 @@ export function TranscriptionPanel({
             </TooltipTrigger>
             <TooltipContent>Copy</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                disabled={transcribing}
-                onClick={() => setRetranscribeOpen(true)}
-                aria-label="Re-transcribe"
-              >
-                {transcribing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Re-transcribe</TooltipContent>
-          </Tooltip>
-          <RetranscribeDialog
-            open={retranscribeOpen}
-            onOpenChange={setRetranscribeOpen}
-            onConfirm={onRetranscribe}
-            transcribing={transcribing}
-          />
+          {whisperEnabled && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    disabled={transcribing}
+                    onClick={() => setRetranscribeOpen(true)}
+                    aria-label="Re-transcribe"
+                  >
+                    {transcribing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Re-transcribe</TooltipContent>
+              </Tooltip>
+              <RetranscribeDialog
+                open={retranscribeOpen}
+                onOpenChange={setRetranscribeOpen}
+                onConfirm={onRetranscribe}
+                transcribing={transcribing}
+              />
+            </>
+          )}
         </div>
       </div>
       <div ref={containerRef} className="text-sm leading-relaxed bg-muted/50 rounded p-2 max-h-40 overflow-y-auto overflow-x-hidden">

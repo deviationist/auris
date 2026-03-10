@@ -184,6 +184,18 @@ export async function getClientRecordMaxMinutes(): Promise<number> {
   return isNaN(val) || val <= 0 ? 30 : val;
 }
 
+export async function getWhisperEnabled(): Promise<boolean> {
+  const config = await readConfig();
+  // Default on — only disabled when explicitly set to "false"
+  return config.WHISPER_ENABLED !== "false";
+}
+
+export async function setWhisperEnabled(enabled: boolean): Promise<void> {
+  const config = await readConfig();
+  config.WHISPER_ENABLED = enabled ? "true" : "false";
+  await writeConfig(config);
+}
+
 export async function getWhisperLanguage(): Promise<string> {
   const config = await readConfig();
   return config.WHISPER_LANGUAGE || "auto";

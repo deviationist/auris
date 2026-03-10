@@ -14,6 +14,7 @@ const DEFAULT_STATUS: Status = {
   server_playback: null,
   vox: { active: false, state: "idle", currentLevel: -96, threshold: -30, recordingDuration: 0, recordingFilename: null, silenceRemaining: 0, config: { threshold: -30, triggerMs: 500, preBufferSecs: 5, postSilenceSecs: 10 } },
   compressor: { enabled: false, threshold: -20, ratio: 4, makeup: 6, attack: 20, release: 250 },
+  whisper_enabled: true,
 };
 
 export function useDataFetching() {

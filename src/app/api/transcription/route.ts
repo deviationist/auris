@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getWhisperLanguage, setWhisperLanguage, getWhisperTranslate, setWhisperTranslate, getWhisperThreads, setWhisperThreads, getWhisperVad, setWhisperVad } from "@/lib/device-config";
+import { getWhisperEnabled, setWhisperEnabled, getWhisperLanguage, setWhisperLanguage, getWhisperTranslate, setWhisperTranslate, getWhisperThreads, setWhisperThreads, getWhisperVad, setWhisperVad } from "@/lib/device-config";
 
 export async function GET() {
-  const [language, translate, threads, vad] = await Promise.all([getWhisperLanguage(), getWhisperTranslate(), getWhisperThreads(), getWhisperVad()]);
-  return NextResponse.json({ language, translate, threads, vad: vad.enabled, vadModel: vad.model });
+  const [enabled, language, translate, threads, vad] = await Promise.all([getWhisperEnabled(), getWhisperLanguage(), getWhisperTranslate(), getWhisperThreads(), getWhisperVad()]);
+  return NextResponse.json({ enabled, language, translate, threads, vad: vad.enabled, vadModel: vad.model });
 }
 
 export async function PUT(req: NextRequest) {
   const body = await req.json();
+
+  if (body.enabled !== undefined) {
+    await setWhisperEnabled(!!body.enabled);
+  }
 
   if (body.language !== undefined) {
     if (typeof body.language !== "string" || body.language.length === 0) {
@@ -32,6 +36,6 @@ export async function PUT(req: NextRequest) {
     await setWhisperVad(!!body.vad, body.vadModel);
   }
 
-  const [language, translate, threads, vad] = await Promise.all([getWhisperLanguage(), getWhisperTranslate(), getWhisperThreads(), getWhisperVad()]);
-  return NextResponse.json({ ok: true, language, translate, threads, vad: vad.enabled, vadModel: vad.model });
+  const [enabled, language, translate, threads, vad] = await Promise.all([getWhisperEnabled(), getWhisperLanguage(), getWhisperTranslate(), getWhisperThreads(), getWhisperVad()]);
+  return NextResponse.json({ ok: true, enabled, language, translate, threads, vad: vad.enabled, vadModel: vad.model });
 }

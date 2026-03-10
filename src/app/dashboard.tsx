@@ -61,6 +61,7 @@ function DashboardContent({ authEnabled }: { authEnabled: boolean }) {
     setMixerOpen,
     updateMixer,
     transcribingFiles,
+    status,
   } = useDashboard();
   const [transcriptionDialogOpen, setTranscriptionDialogOpen] = React.useState(false);
 
@@ -75,24 +76,28 @@ function DashboardContent({ authEnabled }: { authEnabled: boolean }) {
             Remote Audio Console
           </span>
           <div className="ml-auto flex items-center gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={transcribingFiles.size > 0 ? `Transcription (${transcribingFiles.size} active)` : "Transcription"}
-                  className="relative"
-                  onClick={() => setTranscriptionDialogOpen(true)}
-                >
-                  <Languages className="h-5 w-5" />
-                  {transcribingFiles.size > 0 && (
-                    <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary animate-pulse" aria-hidden="true" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Transcription</TooltipContent>
-            </Tooltip>
-            <TranscriptionDialog open={transcriptionDialogOpen} onOpenChange={setTranscriptionDialogOpen} />
+            {status.whisper_enabled && (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={transcribingFiles.size > 0 ? `Transcription (${transcribingFiles.size} active)` : "Transcription"}
+                      className="relative"
+                      onClick={() => setTranscriptionDialogOpen(true)}
+                    >
+                      <Languages className="h-5 w-5" />
+                      {transcribingFiles.size > 0 && (
+                        <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary animate-pulse" aria-hidden="true" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Transcription</TooltipContent>
+                </Tooltip>
+                <TranscriptionDialog open={transcriptionDialogOpen} onOpenChange={setTranscriptionDialogOpen} />
+              </>
+            )}
             <span className="hidden [@media(pointer:fine)]:contents">
               <Tooltip>
                 <TooltipTrigger asChild>

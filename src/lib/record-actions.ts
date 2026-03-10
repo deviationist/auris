@@ -1,4 +1,4 @@
-import { setCaptureMode, getCaptureMode, getRecordStartedAt, setRecordStartedAt, getRecordChunkMinutes, getRecordChunkPart, setRecordChunkPart } from "@/lib/device-config";
+import { setCaptureMode, getCaptureMode, getRecordStartedAt, setRecordStartedAt, getRecordChunkMinutes, getRecordChunkPart, setRecordChunkPart, getWhisperEnabled } from "@/lib/device-config";
 import { isActive, startUnit, stopUnit } from "@/lib/systemctl";
 import { isVoxActive, stopVox } from "@/lib/vox";
 import { getDb } from "@/lib/db";
@@ -128,21 +128,23 @@ export async function stopRecording(): Promise<number> {
           })
           .catch(() => {});
         // Fire-and-forget transcription (queued, serial)
-        setTranscriptionProgress(activeFile, 0);
-        const signal = createTranscriptionAbort(activeFile);
-        enqueueTranscription(activeFile, async () => {
-          if (signal.aborted) throw new Error("Transcription cancelled");
-          await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, activeFile));
-          const result = await generateTranscription(filePath, { onProgress: (pct) => setTranscriptionProgress(activeFile, pct), signal });
-          const stored = result.segments.length > 0 ? JSON.stringify({ text: result.text, segments: result.segments }) : result.text;
-          await db.update(recordings).set({ transcription: stored, transcriptionLang: result.language, transcriptionStatus: "done" }).where(eq(recordings.filename, activeFile));
-          clearTranscriptionProgress(activeFile);
-        }).catch(() => {
-          clearTranscriptionProgress(activeFile);
-          if (!signal.aborted) {
-            db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, activeFile)).catch(() => {});
-          }
-        });
+        if (await getWhisperEnabled()) {
+          setTranscriptionProgress(activeFile, 0);
+          const signal = createTranscriptionAbort(activeFile);
+          enqueueTranscription(activeFile, async () => {
+            if (signal.aborted) throw new Error("Transcription cancelled");
+            await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, activeFile));
+            const result = await generateTranscription(filePath, { onProgress: (pct) => setTranscriptionProgress(activeFile, pct), signal });
+            const stored = result.segments.length > 0 ? JSON.stringify({ text: result.text, segments: result.segments }) : result.text;
+            await db.update(recordings).set({ transcription: stored, transcriptionLang: result.language, transcriptionStatus: "done" }).where(eq(recordings.filename, activeFile));
+            clearTranscriptionProgress(activeFile);
+          }).catch(() => {
+            clearTranscriptionProgress(activeFile);
+            if (!signal.aborted) {
+              db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, activeFile)).catch(() => {});
+            }
+          });
+        }
       } catch {
         // ignore metadata update failure
       }

@@ -8,7 +8,7 @@ import { recordings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { generateWaveform, hashWaveform } from "@/lib/waveform";
 import { generateTranscription, enqueueTranscription, setTranscriptionProgress, clearTranscriptionProgress, createTranscriptionAbort } from "@/lib/transcription";
-import { getRecordDevice, getVoxConfig, type VoxConfig } from "@/lib/device-config";
+import { getRecordDevice, getVoxConfig, getWhisperEnabled, type VoxConfig } from "@/lib/device-config";
 import { listCaptureDevices } from "@/lib/alsa";
 
 const execFileAsync = promisify(execFile);
@@ -422,21 +422,23 @@ async function finalizeRecording(instance: VoxInstance): Promise<void> {
       .catch(() => {});
 
     // Fire-and-forget transcription
-    setTranscriptionProgress(filename, 0);
-    const signal = createTranscriptionAbort(filename);
-    enqueueTranscription(filename, async () => {
-      if (signal.aborted) throw new Error("Transcription cancelled");
-      await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, filename));
-      const result = await generateTranscription(mp3Path, { onProgress: (pct) => setTranscriptionProgress(filename, pct), signal });
-      const stored = result.segments.length > 0 ? JSON.stringify({ text: result.text, segments: result.segments }) : result.text;
-      await db.update(recordings).set({ transcription: stored, transcriptionLang: result.language, transcriptionStatus: "done" }).where(eq(recordings.filename, filename));
-      clearTranscriptionProgress(filename);
-    }).catch(() => {
-      clearTranscriptionProgress(filename);
-      if (!signal.aborted) {
-        db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, filename)).catch(() => {});
-      }
-    });
+    if (await getWhisperEnabled()) {
+      setTranscriptionProgress(filename, 0);
+      const signal = createTranscriptionAbort(filename);
+      enqueueTranscription(filename, async () => {
+        if (signal.aborted) throw new Error("Transcription cancelled");
+        await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, filename));
+        const result = await generateTranscription(mp3Path, { onProgress: (pct) => setTranscriptionProgress(filename, pct), signal });
+        const stored = result.segments.length > 0 ? JSON.stringify({ text: result.text, segments: result.segments }) : result.text;
+        await db.update(recordings).set({ transcription: stored, transcriptionLang: result.language, transcriptionStatus: "done" }).where(eq(recordings.filename, filename));
+        clearTranscriptionProgress(filename);
+      }).catch(() => {
+        clearTranscriptionProgress(filename);
+        if (!signal.aborted) {
+          db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, filename)).catch(() => {});
+        }
+      });
+    }
   } catch (err) {
     console.error("[vox] Failed to finalize recording:", err);
     // Clean up temp file on error

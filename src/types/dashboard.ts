@@ -30,6 +30,7 @@ export interface Status {
   server_playback: { filename: string; startedAt: number } | null;
   vox: VoxStatus;
   compressor: CompressorConfig;
+  whisper_enabled: boolean;
 }
 
 export interface Recording {

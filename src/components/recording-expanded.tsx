@@ -14,6 +14,7 @@ export function RecordingExpanded({
   onLoadTranscription,
   onRetranscribe,
   transcribing,
+  whisperEnabled = true,
 }: {
   rec: Recording;
   autoPlay?: boolean;
@@ -21,6 +22,7 @@ export function RecordingExpanded({
   onLoadTranscription: () => void;
   onRetranscribe: (options?: { language?: string; translate?: boolean }) => void;
   transcribing: boolean;
+  whisperEnabled?: boolean;
 }) {
   const playbackTimeRef = useRef(0);
   const seekRef = useRef<((time: number) => void) | null>(null);
@@ -49,6 +51,7 @@ export function RecordingExpanded({
           onLoad={onLoadTranscription}
           onRetranscribe={onRetranscribe}
           transcribing={transcribing}
+          whisperEnabled={whisperEnabled}
           timeRef={playbackTimeRef}
           onSeek={handleSeek}
         />
@@ -56,9 +59,11 @@ export function RecordingExpanded({
       {rec.transcriptionStatus === "error" && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span>Transcription failed</span>
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onRetranscribe()}>
-            <RotateCcw className="h-3 w-3 mr-1" /> Retry
-          </Button>
+          {whisperEnabled && (
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onRetranscribe()}>
+              <RotateCcw className="h-3 w-3 mr-1" /> Retry
+            </Button>
+          )}
         </div>
       )}
     </>

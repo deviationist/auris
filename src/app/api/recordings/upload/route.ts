@@ -11,6 +11,7 @@ import { recordings } from "@/lib/db/schema";
 import { generateWaveform, hashWaveform } from "@/lib/waveform";
 import { generateTranscription, enqueueTranscription, setTranscriptionProgress, clearTranscriptionProgress, createTranscriptionAbort } from "@/lib/transcription";
 import { buildFilterChain, DEFAULT_EFFECTS, type TalkbackEffects } from "@/lib/talkback-effects";
+import { getWhisperEnabled } from "@/lib/device-config";
 
 const execFileAsync = promisify(execFile);
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
@@ -145,23 +146,25 @@ export async function POST(req: NextRequest) {
       })
       .catch(() => {});
     // Fire-and-forget transcription (queued, serial)
-    setTranscriptionProgress(filename, 0);
-    const signal = createTranscriptionAbort(filename);
-    enqueueTranscription(filename, async () => {
-      if (signal.aborted) throw new Error("Transcription cancelled");
-      const { eq } = await import("drizzle-orm");
-      await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, filename));
-      const result = await generateTranscription(mp3Path, { onProgress: (pct) => setTranscriptionProgress(filename, pct), signal });
-      const stored = result.segments.length > 0 ? JSON.stringify({ text: result.text, segments: result.segments }) : result.text;
-      await db.update(recordings).set({ transcription: stored, transcriptionLang: result.language, transcriptionStatus: "done" }).where(eq(recordings.filename, filename));
-      clearTranscriptionProgress(filename);
-    }).catch(async () => {
-      clearTranscriptionProgress(filename);
-      if (!signal.aborted) {
+    if (await getWhisperEnabled()) {
+      setTranscriptionProgress(filename, 0);
+      const signal = createTranscriptionAbort(filename);
+      enqueueTranscription(filename, async () => {
+        if (signal.aborted) throw new Error("Transcription cancelled");
         const { eq } = await import("drizzle-orm");
-        await db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, filename)).catch(() => {});
-      }
-    });
+        await db.update(recordings).set({ transcriptionStatus: "processing" }).where(eq(recordings.filename, filename));
+        const result = await generateTranscription(mp3Path, { onProgress: (pct) => setTranscriptionProgress(filename, pct), signal });
+        const stored = result.segments.length > 0 ? JSON.stringify({ text: result.text, segments: result.segments }) : result.text;
+        await db.update(recordings).set({ transcription: stored, transcriptionLang: result.language, transcriptionStatus: "done" }).where(eq(recordings.filename, filename));
+        clearTranscriptionProgress(filename);
+      }).catch(async () => {
+        clearTranscriptionProgress(filename);
+        if (!signal.aborted) {
+          const { eq } = await import("drizzle-orm");
+          await db.update(recordings).set({ transcriptionStatus: "error" }).where(eq(recordings.filename, filename)).catch(() => {});
+        }
+      });
+    }
 
     return NextResponse.json({ ok: true, filename });
   } catch (error) {

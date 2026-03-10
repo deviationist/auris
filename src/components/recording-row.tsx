@@ -64,7 +64,7 @@ export function RecordingRow({
     playRecording, startServerPlayback, stopServerPlayback,
     saveRecordingName, deleteRecording,
     fetchTranscription, triggerTranscription, cancelTranscriptionFn,
-    playingFile, shouldAutoPlay,
+    playingFile, shouldAutoPlay, status,
   } = useDashboard();
 
   const [transcribeDialogOpen, setTranscribeDialogOpen] = React.useState(false);
@@ -234,30 +234,26 @@ export function RecordingRow({
                     <Ban className="h-4 w-4" aria-hidden="true" />
                     Cancel transcription
                   </DropdownMenuItem>
-                ) : (
-                  <>
-                    {rec.transcriptionStatus === "done" ? (
-                      <DropdownMenuItem
-                        disabled={isActive}
-                        onClick={() => {
-                          if (playingFile !== rec.filename) playRecording(rec.filename, false);
-                          if (!transcriptions[rec.filename]) fetchTranscription(rec.filename);
-                        }}
-                      >
-                        <Languages className="h-4 w-4" aria-hidden="true" />
-                        Show transcription
-                      </DropdownMenuItem>
-                    ) : (
-                      <DropdownMenuItem
-                        disabled={isActive}
-                        onClick={() => setTranscribeDialogOpen(true)}
-                      >
-                        <Languages className="h-4 w-4" aria-hidden="true" />
-                        Transcribe...
-                      </DropdownMenuItem>
-                    )}
-                  </>
-                )}
+                ) : rec.transcriptionStatus === "done" ? (
+                  <DropdownMenuItem
+                    disabled={isActive}
+                    onClick={() => {
+                      if (playingFile !== rec.filename) playRecording(rec.filename, false);
+                      if (!transcriptions[rec.filename]) fetchTranscription(rec.filename);
+                    }}
+                  >
+                    <Languages className="h-4 w-4" aria-hidden="true" />
+                    Show transcription
+                  </DropdownMenuItem>
+                ) : status.whisper_enabled ? (
+                  <DropdownMenuItem
+                    disabled={isActive}
+                    onClick={() => setTranscribeDialogOpen(true)}
+                  >
+                    <Languages className="h-4 w-4" aria-hidden="true" />
+                    Transcribe...
+                  </DropdownMenuItem>
+                ) : null}
                 {isActive ? (
                   <DropdownMenuItem disabled>
                     <Download className="h-4 w-4" aria-hidden="true" />
@@ -325,6 +321,7 @@ export function RecordingRow({
               onLoadTranscription={() => { if (!transcriptions[rec.filename]) fetchTranscription(rec.filename); }}
               onRetranscribe={(opts) => triggerTranscription(rec.filename, opts)}
               transcribing={transcribingFiles.has(rec.filename)}
+              whisperEnabled={status.whisper_enabled}
             />
           </TableCell>
         </TableRow>

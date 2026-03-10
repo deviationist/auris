@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { recordings } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { generateTranscription, enqueueTranscription, parseStoredTranscription, getTranscriptionProgress, setTranscriptionProgress, clearTranscriptionProgress, createTranscriptionAbort, cancelTranscription } from "@/lib/transcription";
+import { getWhisperEnabled } from "@/lib/device-config";
 
 const RECORDINGS_DIR = process.env.RECORDINGS_DIR || "/recordings";
 
@@ -66,6 +67,10 @@ export async function POST(
 
   if (!row) {
     return NextResponse.json({ error: "Recording not found" }, { status: 404 });
+  }
+
+  if (!(await getWhisperEnabled())) {
+    return NextResponse.json({ error: "Transcription is disabled" }, { status: 403 });
   }
 
   if (row.transcriptionStatus === "processing") {
