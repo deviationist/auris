@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { startVox, isVoxActive } from "@/lib/vox";
-import { isActive } from "@/lib/systemctl";
+import { isDirectRecording } from "@/lib/direct-record";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +11,7 @@ export async function POST(req: Request) {
     }
 
     // Check for active manual recording (shares ALSA device)
-    const recording = await isActive("auris-record");
-    if (recording) {
+    if (isDirectRecording()) {
       return NextResponse.json({ error: "Cannot start VOX while manual recording is active" }, { status: 409 });
     }
 

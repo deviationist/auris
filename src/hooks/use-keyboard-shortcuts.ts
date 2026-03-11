@@ -3,11 +3,10 @@
 import { useEffect } from "react";
 
 export function useKeyboardShortcuts({
-  statusRecording, recordLoading, listenLoading, liveConnected, toneLoading,
+  statusRecording, recordLoading, listenLoading, liveConnected,
   talkbackActive, clientRecording, clientRecordUploading,
   toggleRecord, setStopRecordDialogOpen,
   startListening, cancelListening, stopListening,
-  sendTestTone, cancelTestTone,
   startTalkback, stopTalkback,
   startClientRecording, stopClientRecording,
 }: {
@@ -15,7 +14,6 @@ export function useKeyboardShortcuts({
   recordLoading: boolean;
   listenLoading: boolean;
   liveConnected: boolean;
-  toneLoading: boolean;
   talkbackActive: boolean;
   clientRecording: boolean;
   clientRecordUploading: boolean;
@@ -24,8 +22,6 @@ export function useKeyboardShortcuts({
   startListening: () => void;
   cancelListening: () => void;
   stopListening: () => void;
-  sendTestTone: () => void;
-  cancelTestTone: () => void;
   startTalkback: () => void;
   stopTalkback: () => void;
   startClientRecording: () => void;
@@ -41,8 +37,7 @@ export function useKeyboardShortcuts({
       if (document.querySelector("[data-radix-popper-content-wrapper]") || document.querySelector("[role=\"dialog\"]")) return;
       const key = e.key.toLowerCase();
       if (key === "r") { e.preventDefault(); if (recordLoading) return; if (statusRecording) setStopRecordDialogOpen(true); else toggleRecord(); }
-      else if (key === "l") { e.preventDefault(); if (toneLoading) return; if (listenLoading) cancelListening(); else if (liveConnected) stopListening(); else startListening(); }
-      else if (key === "t") { e.preventDefault(); if (statusRecording || listenLoading) return; if (toneLoading) cancelTestTone(); else sendTestTone(); }
+      else if (key === "l") { e.preventDefault(); if (listenLoading) cancelListening(); else if (liveConnected) stopListening(); else startListening(); }
       else if (key === "k") { e.preventDefault(); if (!talkbackActive) startTalkback(); }
       else if (key === "c") { e.preventDefault(); if (!clientRecordUploading) { if (clientRecording) stopClientRecording(); else startClientRecording(); } }
     }
@@ -52,6 +47,6 @@ export function useKeyboardShortcuts({
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("keyup", handleKeyUp);
     return () => { document.removeEventListener("keydown", handleKeyDown); document.removeEventListener("keyup", handleKeyUp); };
-  }, [statusRecording, recordLoading, listenLoading, liveConnected, toneLoading, talkbackActive, clientRecording, clientRecordUploading,
-    toggleRecord, setStopRecordDialogOpen, startListening, cancelListening, stopListening, sendTestTone, cancelTestTone, startTalkback, stopTalkback, startClientRecording, stopClientRecording]);
+  }, [statusRecording, recordLoading, listenLoading, liveConnected, talkbackActive, clientRecording, clientRecordUploading,
+    toggleRecord, setStopRecordDialogOpen, startListening, cancelListening, stopListening, startTalkback, stopTalkback, startClientRecording, stopClientRecording]);
 }

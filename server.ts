@@ -4,9 +4,9 @@ import { parse } from "url";
 import { WebSocketServer } from "ws";
 import type { Duplex } from "stream";
 import { handleTalkbackSocket, isTalkbackActive, onTalkbackStart } from "./src/lib/talkback.js";
+import { handleMonitorSocket } from "./src/lib/monitor-stream.js";
 import { setTalkbackActiveCheck, stopPlayback } from "./src/lib/server-playback.js";
 import { isAuthEnabled } from "./src/lib/auth-config.js";
-import { startIdleCheck } from "./src/lib/stream-idle.js";
 // VOX engine import — ensures globalThis singleton is initialized for API routes
 import "./src/lib/vox.js";
 import { decode } from "next-auth/jwt";
@@ -65,6 +65,15 @@ app.prepare().then(() => {
       wss.handleUpgrade(req, socket, head, (ws) => {
         handleTalkbackSocket(ws, query);
       });
+    } else if (pathname === "/ws/monitor") {
+      if (!(await isWsAuthenticated(req))) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        handleMonitorSocket(ws);
+      });
     } else {
       // Let Next.js handle other WebSocket upgrades (HMR etc)
       upgrade(req, socket, head);
@@ -73,6 +82,5 @@ app.prepare().then(() => {
 
   server.listen(port, () => {
     console.log(`> Ready on http://localhost:${port}`);
-    startIdleCheck();
   });
 });

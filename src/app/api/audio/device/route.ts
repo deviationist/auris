@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { setListenDevice, setRecordDevice } from "@/lib/device-config";
-import { isActive, stopUnit, startUnit } from "@/lib/systemctl";
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,15 +21,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (role === "listen") {
-      const streamWasActive = await isActive("auris-stream");
-      if (streamWasActive) await stopUnit("auris-stream");
       await setListenDevice(alsaId);
-      if (streamWasActive) await startUnit("auris-stream");
+      // Monitor stream manages its own ffmpeg lifecycle — client will
+      // disconnect and reconnect with the new device automatically.
     } else {
-      const recordWasActive = await isActive("auris-record");
-      if (recordWasActive) await stopUnit("auris-record");
       await setRecordDevice(alsaId);
-      if (recordWasActive) await startUnit("auris-record");
+      // Recording device change takes effect on next recording start.
     }
 
     return NextResponse.json({ ok: true, device: alsaId, role });

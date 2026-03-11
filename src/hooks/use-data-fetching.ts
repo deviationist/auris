@@ -5,7 +5,6 @@ import type { CardMixerState } from "@/components/card-mixer";
 import type { Status, Recording, DeviceState, PlaybackState } from "@/types/dashboard";
 
 const DEFAULT_STATUS: Status = {
-  streaming: false,
   recording: false,
   recording_file: null,
   recording_started: null,

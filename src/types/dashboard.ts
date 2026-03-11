@@ -21,7 +21,6 @@ export interface CompressorConfig {
 }
 
 export interface Status {
-  streaming: boolean;
   recording: boolean;
   recording_file: string | null;
   recording_started: number | null;

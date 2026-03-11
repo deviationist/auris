@@ -8,7 +8,7 @@ import type { CardMixerState } from "@/components/card-mixer";
 export function useDevices({
   deviceState, playbackState,
   fetchDevices, fetchStatus, fetchAllMixers, fetchPlaybackDevices,
-  liveConnected, disconnectLiveAudio, listenInitiatedStreamRef,
+  liveConnected, disconnectLiveAudio,
 }: {
   deviceState: DeviceState | null;
   playbackState: PlaybackState | null;
@@ -18,7 +18,6 @@ export function useDevices({
   fetchPlaybackDevices: () => Promise<void>;
   liveConnected: boolean;
   disconnectLiveAudio: () => void;
-  listenInitiatedStreamRef: React.MutableRefObject<boolean>;
 }) {
   const [deviceLoading, setDeviceLoading] = useState(false);
   const [mixerLoading, setMixerLoading] = useState(false);
@@ -38,7 +37,7 @@ export function useDevices({
     setDeviceLoading(true);
     try {
       if (liveConnected) disconnectLiveAudio();
-      listenInitiatedStreamRef.current = false;
+
       await fetch("/api/audio/device", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alsaId, role: "listen" }) });
       await Promise.all([fetchDevices(), fetchStatus(), fetchAllMixers()]);
     } finally { setDeviceLoading(false); }
@@ -54,7 +53,7 @@ export function useDevices({
     setDeviceLoading(true);
     try {
       if (liveConnected) disconnectLiveAudio();
-      listenInitiatedStreamRef.current = false;
+
       await fetch("/api/audio/bitrate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bitrate, role: "listen" }) });
       await Promise.all([fetchDevices(), fetchStatus()]);
     } finally { setDeviceLoading(false); }

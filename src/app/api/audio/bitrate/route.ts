@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { setStreamBitrate, setRecordBitrate } from "@/lib/device-config";
-import { isActive, stopUnit, startUnit } from "@/lib/systemctl";
 
 const VALID_BITRATES = ["64k", "96k", "128k", "192k", "256k", "320k"];
 
@@ -21,15 +20,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (role === "listen") {
-      const streamWasActive = await isActive("auris-stream");
-      if (streamWasActive) await stopUnit("auris-stream");
+      // Monitor stream uses raw PCM — stream bitrate is no longer relevant
+      // for listening, but we save it for potential future use.
       await setStreamBitrate(bitrate);
-      if (streamWasActive) await startUnit("auris-stream");
     } else {
-      const recordWasActive = await isActive("auris-record");
-      if (recordWasActive) await stopUnit("auris-record");
       await setRecordBitrate(bitrate);
-      if (recordWasActive) await startUnit("auris-record");
+      // Recording bitrate change takes effect on next recording start.
     }
 
     return NextResponse.json({ ok: true, bitrate, role });

@@ -76,13 +76,10 @@ export interface DashboardContextValue {
   liveConnected: boolean;
   listenLoading: boolean;
   listenReconnecting: boolean;
-  toneLoading: boolean;
-  toneConnected: boolean;
   startListening: () => void;
   cancelListening: () => void;
   stopListening: () => void;
-  sendTestTone: () => void;
-  cancelTestTone: () => void;
+  monitorAnalyserRef: React.MutableRefObject<AnalyserNode | null>;
 
   // Audio refs
   audioRef: React.RefObject<HTMLAudioElement | null>;
@@ -165,7 +162,7 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   const devices = useDevices({
     deviceState: data.deviceState, playbackState: data.playbackState,
     fetchDevices: data.fetchDevices, fetchStatus: data.fetchStatus, fetchAllMixers: data.fetchAllMixers, fetchPlaybackDevices: data.fetchPlaybackDevices,
-    liveConnected: listening.liveConnected, disconnectLiveAudio: listening.disconnectLiveAudio, listenInitiatedStreamRef: listening.listenInitiatedStreamRef,
+    liveConnected: listening.liveConnected, disconnectLiveAudio: listening.disconnectLiveAudio,
   });
   const compressor = useCompressor();
   const recList = useRecordingsList({ recordings: data.recordings, setRecordings: data.setRecordings, fetchRecordings: data.fetchRecordings, fetchStatus: data.fetchStatus, status: data.status });
@@ -183,11 +180,10 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
 
   useKeyboardShortcuts({
     statusRecording: data.status.recording, recordLoading: recording.recordLoading,
-    listenLoading: listening.listenLoading, liveConnected: listening.liveConnected, toneLoading: listening.toneLoading,
+    listenLoading: listening.listenLoading, liveConnected: listening.liveConnected,
     talkbackActive: talkback.talkbackActive, clientRecording: clientRec.clientRecording, clientRecordUploading: clientRec.clientRecordUploading,
     toggleRecord: recording.toggleRecord, setStopRecordDialogOpen: recording.setStopRecordDialogOpen,
     startListening: listening.startListening, cancelListening: listening.cancelListening, stopListening: listening.stopListening,
-    sendTestTone: listening.sendTestTone, cancelTestTone: listening.cancelTestTone,
     startTalkback: talkback.startTalkback, stopTalkback: talkback.stopTalkback,
     startClientRecording: clientRec.startClientRecording, stopClientRecording: clientRec.stopClientRecording,
   });

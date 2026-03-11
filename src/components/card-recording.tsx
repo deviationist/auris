@@ -58,8 +58,9 @@ import { useVoxStream } from "@/hooks/use-vox-stream";
 export function CardRecording() {
   const {
     status, statusLoaded, deviceState, deviceLoading,
-    recordLoading, toneLoading, recordElapsed,
-    audioContextReady, audioContextRef,
+    recordLoading, recordElapsed,
+    audioContextReady,
+    monitorAnalyserRef,
     stopRecordDialogOpen, setStopRecordDialogOpen,
     toggleRecord, ensureAudioContext,
     selectRecordDevice, setRecordBitrate, setChunkMinutes,
@@ -246,7 +247,7 @@ export function CardRecording() {
         {status.recording ? (
           <AlertDialog open={stopRecordDialogOpen} onOpenChange={setStopRecordDialogOpen}>
             <AlertDialogTrigger asChild>
-              <Button disabled={!statusLoaded || recordLoading || toneLoading} variant="destructive" className="w-full">
+              <Button disabled={!statusLoaded || recordLoading} variant="destructive" className="w-full">
                 {recordLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Square className="mr-2 h-4 w-4" />}
                 Stop Recording
                 <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">R</kbd>
@@ -264,7 +265,7 @@ export function CardRecording() {
             </AlertDialogContent>
           </AlertDialog>
         ) : (
-          <Button onClick={toggleRecord} disabled={!statusLoaded || recordLoading || toneLoading || status.vox.active} className="w-full gap-1">
+          <Button onClick={toggleRecord} disabled={!statusLoaded || recordLoading || status.vox.active} className="w-full gap-1">
             {recordLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Circle className="mr-2 h-4 w-4 fill-red-500 text-red-500" />}
             Start Recording
             <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">R</kbd>
@@ -273,7 +274,7 @@ export function CardRecording() {
         {status.recording && (
           <>
             <div className="relative">
-              <LiveWaveform active={status.recording} audioContext={audioContextReady ? audioContextRef.current : null} streamUrl="/stream/mic" />
+              <LiveWaveform active={status.recording} analyserNode={monitorAnalyserRef.current} />
               {!audioContextReady && (
                 <div
                   className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-muted-foreground cursor-pointer bg-background/80 hover:bg-background/60 transition-colors"

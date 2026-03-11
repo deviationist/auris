@@ -125,7 +125,6 @@ function DashboardContent({ authEnabled }: { authEnabled: boolean }) {
                   {[
                     ["Toggle recording", "R"],
                     ["Toggle listening", "L"],
-                    ["Send test tone", "T"],
                     ["Push-to-talk (hold)", "K"],
                     ["Client record", "C"],
                   ].map(([label, key]) => (

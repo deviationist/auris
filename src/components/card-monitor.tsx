@@ -2,7 +2,6 @@
 
 import React from "react";
 import {
-  AudioWaveform,
   CircleHelp,
   Cog,
   Loader2,
@@ -39,21 +38,18 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { LevelMeter } from "@/components/level-meter";
-import { BITRATE_OPTIONS } from "@/lib/format";
 import { useDashboard } from "@/contexts/dashboard-context";
 
 export function CardMonitor() {
   const {
-    status, deviceState, deviceLoading,
+    deviceState, deviceLoading,
     liveConnected, listenLoading, listenReconnecting,
-    toneLoading, toneConnected,
-    audioContextReady, audioContextRef, audioRef,
     startListening, cancelListening, stopListening,
-    sendTestTone, cancelTestTone,
-    selectListenDevice, setStreamBitrate,
+    selectListenDevice,
     compressorConfig, compressorConfigOpen, setCompressorConfigOpen,
     compressorConfigLoaded, setCompressorConfigLoaded, setCompressorConfig,
     saveCompressorConfig,
+    monitorAnalyserRef,
   } = useDashboard();
 
   return (
@@ -70,10 +66,6 @@ export function CardMonitor() {
               <Badge variant="secondary" role="status" aria-live="polite">
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" /> {listenReconnecting ? "Reconnecting" : "Connecting"}
               </Badge>
-            ) : toneLoading ? (
-              <Badge variant="secondary" role="status" aria-live="polite">
-                <AudioWaveform className="mr-1 h-3 w-3" aria-hidden="true" /> Test Tone
-              </Badge>
             ) : null}
             <Popover open={compressorConfigOpen} onOpenChange={async (open) => {
               setCompressorConfigOpen(open);
@@ -84,7 +76,7 @@ export function CardMonitor() {
               }
             }}>
               <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Listening device settings"><Cog className="h-3.5 w-3.5" /></Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Monitor settings"><Cog className="h-3.5 w-3.5" /></Button>
               </PopoverTrigger>
               <PopoverContent className="w-72" align="end">
                 {deviceState && deviceState.devices.length > 0 ? (
@@ -103,13 +95,6 @@ export function CardMonitor() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <p className="text-sm font-medium pt-2">Quality</p>
-                    <Select value={deviceState.streamBitrate} onValueChange={setStreamBitrate} disabled={deviceLoading || liveConnected}>
-                      <SelectTrigger className="text-xs h-8" aria-label="Stream bitrate"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {BITRATE_OPTIONS.map((b) => (<SelectItem key={b} value={b}>{b}bps{b === "128k" ? " (default)" : ""}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
                     <div className="border-t pt-2 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1">
@@ -119,7 +104,7 @@ export function CardMonitor() {
                               <CircleHelp className="h-3.5 w-3.5 text-muted-foreground/60" />
                             </TooltipTrigger>
                             <TooltipContent side="top" className="text-xs max-w-52" onPointerDownOutside={(e) => e.preventDefault()}>
-                              Dynamic range compression — boosts quiet sounds and tames loud ones
+                              Dynamic range compression — boosts quiet sounds and tames loud ones for recordings
                             </TooltipContent>
                           </Tooltip>
                         </div>
@@ -175,7 +160,6 @@ export function CardMonitor() {
       <CardContent className="space-y-3">
         <Button
           onClick={listenLoading ? cancelListening : liveConnected ? stopListening : startListening}
-          disabled={toneLoading}
           variant={liveConnected ? "destructive" : "outline"}
           className="w-full gap-1"
         >
@@ -184,27 +168,8 @@ export function CardMonitor() {
           <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">L</kbd>
         </Button>
 
-        <Tooltip open={status.recording ? undefined : false}>
-          <TooltipTrigger asChild>
-            <span className="block">
-              <Button
-                variant="outline" size="sm"
-                onClick={toneLoading ? cancelTestTone : sendTestTone}
-                disabled={status.recording || listenLoading}
-                className="w-full gap-1 px-3 has-[>svg]:px-3"
-              >
-                {toneLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AudioWaveform className="mr-2 h-4 w-4" />}
-                {toneLoading ? "Cancel" : "Test Tone"}
-                <kbd className="pointer-events-none ml-auto text-[10px] opacity-50 border rounded hidden [@media(pointer:fine)]:inline-flex items-center justify-center w-5 h-5 leading-[0] pt-px">T</kbd>
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent><p>Stop recording before sending a test tone</p></TooltipContent>
-        </Tooltip>
-
-        <audio ref={audioRef} crossOrigin="anonymous" controls={liveConnected || toneConnected} className={`live-audio ${liveConnected || toneConnected ? "w-full h-8" : "hidden"}`} aria-label="Live audio stream" />
-        <div className={liveConnected || toneConnected ? "" : "hidden"}>
-          <LevelMeter audioElement={audioRef.current} audioContext={audioContextReady ? audioContextRef.current : null} active={liveConnected || toneConnected} streamUrl="/stream/mic" />
+        <div className={liveConnected ? "" : "hidden"}>
+          <LevelMeter analyserNode={monitorAnalyserRef.current} active={liveConnected} />
         </div>
       </CardContent>
     </Card>

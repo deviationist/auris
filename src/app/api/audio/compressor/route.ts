@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCompressorConfig, setCompressorConfig } from "@/lib/device-config";
-import { isActive, stopUnit, startUnit } from "@/lib/systemctl";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +20,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     await setCompressorConfig(body);
 
-    const streamWasActive = await isActive("auris-stream");
-    if (streamWasActive) {
-      await stopUnit("auris-stream");
-      await startUnit("auris-stream");
-    }
+    // Compressor applies to recording. If currently recording, the new settings
+    // will take effect on the next recording start (no live restart needed since
+    // restarting mid-recording would create gaps).
 
     const config = await getCompressorConfig();
     return NextResponse.json(config);

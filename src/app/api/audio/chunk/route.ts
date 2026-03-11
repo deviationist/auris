@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRecordChunkMinutes, setRecordChunkMinutes, getRecordStartedAt } from "@/lib/device-config";
-import { isActive } from "@/lib/systemctl";
+import { isDirectRecording } from "@/lib/direct-record";
 import { scheduleChunk } from "@/lib/record-chunker";
 
 export async function GET() {
@@ -24,8 +24,7 @@ export async function POST(request: Request) {
     await setRecordChunkMinutes(minutes);
 
     // Reschedule timer if currently recording
-    const recording = await isActive("auris-record");
-    if (recording) {
+    if (isDirectRecording()) {
       const startedAt = await getRecordStartedAt();
       if (startedAt) {
         scheduleChunk(minutes, startedAt);
