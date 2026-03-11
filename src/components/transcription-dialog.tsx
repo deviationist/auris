@@ -87,6 +87,20 @@ export function TranscriptionDialog({
 
   const updateLanguage = async (lang: string) => {
     setLanguage(lang);
+    if (lang === "en" && translate) {
+      setTranslate(false);
+      try {
+        await fetch("/api/transcription", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ language: lang, translate: false }),
+        });
+        return;
+      } catch {
+        toast.error("Failed to update language");
+        return;
+      }
+    }
     try {
       const res = await fetch("/api/transcription", {
         method: "PUT",
@@ -136,7 +150,7 @@ export function TranscriptionDialog({
                   <label className="text-sm text-muted-foreground">Translate to English</label>
                   <p className="text-xs text-muted-foreground/70">Translates non-English speech to English text</p>
                 </div>
-                <Switch checked={translate} onCheckedChange={updateTranslate} />
+                <Switch checked={translate} onCheckedChange={updateTranslate} disabled={language === "en"} />
               </div>
             </div>
           )}

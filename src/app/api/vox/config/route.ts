@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getVoxConfig, setVoxConfig, type VoxConfig } from "@/lib/device-config";
+import { updateVoxConfig } from "@/lib/vox";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
     };
 
     await setVoxConfig(updated);
+    updateVoxConfig(updated);
     return NextResponse.json(updated);
   } catch (error) {
     return NextResponse.json(

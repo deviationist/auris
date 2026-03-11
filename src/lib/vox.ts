@@ -1,4 +1,5 @@
 import { spawn, execFile, type ChildProcess } from "child_process";
+import { EventEmitter } from "events";
 import { promisify } from "util";
 import { join } from "path";
 import { writeFile, unlink, stat } from "fs/promises";
@@ -25,6 +26,27 @@ export interface VoxStatus {
   recordingFilename: string | null;
   silenceRemaining: number;
   config: VoxConfig;
+}
+
+export interface VoxLevelEvent {
+  state: VoxState;
+  currentLevel: number;
+  threshold: number;
+  recordingDuration: number;
+  recordingFilename: string | null;
+  silenceRemaining: number;
+}
+
+// --- Event emitter for SSE streaming ---
+
+const _globalEmitter = globalThis as unknown as { _voxEmitter?: EventEmitter };
+if (!_globalEmitter._voxEmitter) {
+  _globalEmitter._voxEmitter = new EventEmitter();
+  _globalEmitter._voxEmitter.setMaxListeners(20);
+}
+
+export function getVoxEmitter(): EventEmitter {
+  return _globalEmitter._voxEmitter!;
 }
 
 // --- Circular PCM Buffer ---
@@ -99,6 +121,7 @@ interface VoxInstance {
   tempPcmPath: string | null;
   tempWriteStream: WriteStream | null;
   recordingFilename: string | null;
+  lastEmitTime: number;
 }
 
 const _global = globalThis as unknown as { _voxInstance?: VoxInstance };
@@ -132,6 +155,7 @@ export async function startVox(configOverrides?: Partial<VoxConfig>): Promise<vo
     tempPcmPath: null,
     tempWriteStream: null,
     recordingFilename: null,
+    lastEmitTime: 0,
   };
 
   _global._voxInstance = instance;
@@ -194,6 +218,38 @@ export function isVoxRecording(): boolean {
   return instance !== undefined && (instance.state === "recording" || instance.state === "tail_silence" || instance.state === "finalizing");
 }
 
+export function updateVoxConfig(config: Partial<VoxConfig>): void {
+  const instance = getInstance();
+  if (!instance || instance.state === "idle") return;
+
+  if (config.threshold !== undefined) instance.config.threshold = config.threshold;
+  if (config.triggerMs !== undefined) instance.config.triggerMs = config.triggerMs;
+  if (config.preBufferSecs !== undefined) {
+    instance.config.preBufferSecs = config.preBufferSecs;
+    instance.preBuffer.updateMaxSeconds(config.preBufferSecs);
+  }
+  if (config.postSilenceSecs !== undefined) instance.config.postSilenceSecs = config.postSilenceSecs;
+}
+
+export async function stopCurrentRecording(): Promise<boolean> {
+  const instance = getInstance();
+  if (!instance || (instance.state !== "recording" && instance.state !== "tail_silence")) {
+    return false;
+  }
+
+  instance.state = "finalizing";
+  try {
+    await finalizeRecording(instance);
+  } catch (err) {
+    console.error("[vox] Finalize error:", err);
+  }
+  if (instance === getInstance()) {
+    instance.state = "monitoring";
+    instance.triggerStart = null;
+  }
+  return true;
+}
+
 export function getVoxStatus(): VoxStatus {
   const instance = getInstance();
   if (!instance || instance.state === "idle") {
@@ -246,6 +302,12 @@ function processChunk(instance: VoxInstance, chunk: Buffer) {
   const level = instance.smoothedLevel;
   const threshold = instance.config.threshold;
   const now = Date.now();
+
+  // Throttled SSE emit at ~15Hz
+  if (now - instance.lastEmitTime >= 67) {
+    instance.lastEmitTime = now;
+    _globalEmitter._voxEmitter?.emit("level", buildLevelEvent(instance));
+  }
 
   switch (instance.state) {
     case "monitoring":
@@ -469,4 +531,25 @@ function cleanupInstance(instance: VoxInstance) {
   instance.silenceStart = null;
   instance.recordingFilename = null;
   _global._voxInstance = undefined;
+  _globalEmitter._voxEmitter?.emit("close");
+}
+
+function buildLevelEvent(instance: VoxInstance): VoxLevelEvent {
+  let recordingDuration = 0;
+  if (instance.recordStart) {
+    recordingDuration = (Date.now() - instance.recordStart) / 1000;
+  }
+  let silenceRemaining = 0;
+  if (instance.state === "tail_silence" && instance.silenceStart) {
+    const elapsed = (Date.now() - instance.silenceStart) / 1000;
+    silenceRemaining = Math.max(0, instance.config.postSilenceSecs - elapsed);
+  }
+  return {
+    state: instance.state,
+    currentLevel: Math.round(instance.smoothedLevel * 10) / 10,
+    threshold: instance.config.threshold,
+    recordingDuration,
+    recordingFilename: instance.recordingFilename,
+    silenceRemaining: Math.round(silenceRemaining * 10) / 10,
+  };
 }

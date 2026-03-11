@@ -69,7 +69,7 @@ export function RetranscribeDialog({
             <div className="flex items-center gap-3">
               <label id="retranscribe-lang-label" className="text-sm text-muted-foreground shrink-0">Language</label>
               {language !== null && (
-                <LanguageCombobox value={language} onValueChange={setLanguage} />
+                <LanguageCombobox value={language} onValueChange={(v) => { setLanguage(v); if (v === "en") setTranslate(false); }} />
               )}
             </div>
             <div className="flex items-center justify-between gap-3">
@@ -79,7 +79,7 @@ export function RetranscribeDialog({
                   Translates non-English speech to English text
                 </p>
               </div>
-              <Switch checked={translate} onCheckedChange={setTranslate} aria-labelledby="retranscribe-translate-label" />
+              <Switch checked={translate} onCheckedChange={setTranslate} disabled={language === "en"} aria-labelledby="retranscribe-translate-label" />
             </div>
           </div>
         )}

@@ -53,6 +53,7 @@ import { Slider } from "@/components/ui/slider";
 import { LiveWaveform } from "@/components/live-waveform";
 import { BITRATE_OPTIONS, CHUNK_OPTIONS, formatDuration } from "@/lib/format";
 import { useDashboard } from "@/contexts/dashboard-context";
+import { useVoxStream } from "@/hooks/use-vox-stream";
 
 export function CardRecording() {
   const {
@@ -67,28 +68,75 @@ export function CardRecording() {
     toggleVox, saveVoxConfig,
   } = useDashboard();
 
-  // Client-side interpolation for VOX countdown and duration between polls
+  const [voxStopSaving, setVoxStopSaving] = useState(false);
+
+  // SSE stream for real-time VOX level data
+  const sseVox = useVoxStream(status.vox.active);
+
+  // Merge SSE data with polled status (SSE takes priority when available)
+  const vox = {
+    active: status.vox.active,
+    state: sseVox?.state ?? status.vox.state,
+    currentLevel: sseVox?.currentLevel ?? status.vox.currentLevel,
+    threshold: sseVox?.threshold ?? status.vox.threshold,
+    recordingDuration: sseVox?.recordingDuration ?? status.vox.recordingDuration,
+    recordingFilename: sseVox?.recordingFilename ?? status.vox.recordingFilename,
+    silenceRemaining: sseVox?.silenceRemaining ?? status.vox.silenceRemaining,
+  };
+
+  // Reset saving state when VOX goes back to monitoring
+  useEffect(() => {
+    if (vox.state === "monitoring" || vox.state === "idle") {
+      setVoxStopSaving(false);
+    }
+  }, [vox.state]);
+
+  // Debounce numeric dB display (update every 300ms so it's readable)
+  const [voxDisplayDb, setVoxDisplayDb] = useState("-∞");
+  const voxDbUpdateRef = useRef(0);
+  useEffect(() => {
+    const now = Date.now();
+    if (now - voxDbUpdateRef.current >= 300) {
+      voxDbUpdateRef.current = now;
+      setVoxDisplayDb(vox.currentLevel > -90 ? `${vox.currentLevel}` : "-∞");
+    }
+  }, [vox.currentLevel]);
+
+  // Fetch VOX config when VOX becomes active (so threshold indicator has real data)
+  useEffect(() => {
+    if (status.vox.active && !voxConfigLoaded) {
+      (async () => {
+        try {
+          const res = await fetch("/api/vox/config");
+          if (res.ok) setVoxConfig(await res.json());
+        } catch {}
+        setVoxConfigLoaded(true);
+      })();
+    }
+  }, [status.vox.active, voxConfigLoaded, setVoxConfig, setVoxConfigLoaded]);
+
+  // Client-side interpolation for VOX countdown and duration between SSE updates
   const voxSilenceRef = useRef({ serverValue: 0, receivedAt: 0 });
   const voxDurationRef = useRef({ serverValue: 0, receivedAt: 0 });
   const [interpolatedSilence, setInterpolatedSilence] = useState(0);
   const [interpolatedDuration, setInterpolatedDuration] = useState(0);
 
-  // Capture server values when they change
+  // Capture values when they change (from SSE or polls)
   useEffect(() => {
     const now = Date.now();
-    if (status.vox.state === "tail_silence") {
-      voxSilenceRef.current = { serverValue: status.vox.silenceRemaining, receivedAt: now };
+    if (vox.state === "tail_silence") {
+      voxSilenceRef.current = { serverValue: vox.silenceRemaining, receivedAt: now };
     }
-    if (status.vox.state === "recording" || status.vox.state === "tail_silence") {
-      voxDurationRef.current = { serverValue: status.vox.recordingDuration, receivedAt: now };
+    if (vox.state === "recording" || vox.state === "tail_silence") {
+      voxDurationRef.current = { serverValue: vox.recordingDuration, receivedAt: now };
     }
-  }, [status.vox.silenceRemaining, status.vox.recordingDuration, status.vox.state]);
+  }, [vox.silenceRemaining, vox.recordingDuration, vox.state]);
 
   // Tick interpolation at ~10fps when VOX is recording/counting
   useEffect(() => {
-    if (!status.vox.active || (status.vox.state !== "recording" && status.vox.state !== "tail_silence")) {
-      setInterpolatedSilence(status.vox.silenceRemaining);
-      setInterpolatedDuration(status.vox.recordingDuration);
+    if (!vox.active || (vox.state !== "recording" && vox.state !== "tail_silence")) {
+      setInterpolatedSilence(vox.silenceRemaining);
+      setInterpolatedDuration(vox.recordingDuration);
       return;
     }
     const tick = () => {
@@ -103,7 +151,7 @@ export function CardRecording() {
     tick();
     const id = setInterval(tick, 100);
     return () => clearInterval(id);
-  }, [status.vox.active, status.vox.state, status.vox.silenceRemaining, status.vox.recordingDuration]);
+  }, [vox.active, vox.state, vox.silenceRemaining, vox.recordingDuration]);
 
   return (
     <Card>
@@ -265,10 +313,10 @@ export function CardRecording() {
               </div>
               {status.vox.active && (
                 <Badge
-                  variant={status.vox.state === "recording" || status.vox.state === "tail_silence" ? "default" : "secondary"}
-                  className={`text-[10px] ${status.vox.state === "recording" ? "bg-red-600 hover:bg-red-600 text-white animate-pulse" : status.vox.state === "tail_silence" ? "bg-amber-600 hover:bg-amber-600 text-white" : ""}`}
+                  variant={vox.state === "recording" || vox.state === "tail_silence" ? "default" : "secondary"}
+                  className={`text-[10px] ${vox.state === "recording" ? "bg-red-600 hover:bg-red-600 text-white animate-pulse" : vox.state === "tail_silence" ? "bg-amber-600 hover:bg-amber-600 text-white" : ""}`}
                 >
-                  {status.vox.state === "monitoring" ? "Monitoring" : status.vox.state === "recording" ? "Recording" : status.vox.state === "tail_silence" ? `Silence ${formatDuration(interpolatedSilence)}` : status.vox.state === "finalizing" ? "Saving..." : ""}
+                  {vox.state === "monitoring" ? "Monitoring" : vox.state === "recording" ? "Recording" : vox.state === "tail_silence" ? `Silence ${formatDuration(interpolatedSilence)}` : vox.state === "finalizing" ? "Saving..." : ""}
                 </Badge>
               )}
             </div>
@@ -332,23 +380,57 @@ export function CardRecording() {
           {status.vox.active && (
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all duration-150 rounded-full ${status.vox.state === "recording" || status.vox.state === "tail_silence" ? "bg-red-500" : "bg-green-500"}`}
-                    style={{ width: `${Math.max(0, Math.min(100, ((status.vox.currentLevel + 60) / 50) * 100))}%` }}
-                  />
+                <div className="relative flex-1">
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${vox.state === "recording" || vox.state === "tail_silence" ? "bg-red-500" : "bg-green-500"}`}
+                      style={{ width: `${Math.max(0, Math.min(100, ((vox.currentLevel + 60) / 50) * 100))}%`, transition: "width 75ms ease-out" }}
+                    />
+                  </div>
+                  {voxConfigLoaded && (
+                    <div
+                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 flex flex-col items-center pointer-events-none"
+                      style={{ left: `${Math.max(0, Math.min(100, ((voxConfig.threshold + 60) / 50) * 100))}%` }}
+                      title={`VOX Threshold: ${voxConfig.threshold} dB`}
+                    >
+                      <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-l-transparent border-r-transparent border-t-amber-500" />
+                      <div className="w-0.5 h-2.5 -my-0.5 bg-amber-500" />
+                      <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-b-[5px] border-l-transparent border-r-transparent border-b-amber-500" />
+                    </div>
+                  )}
                 </div>
                 <span className="text-[10px] font-mono text-muted-foreground w-12 text-right tabular-nums">
-                  {status.vox.currentLevel > -90 ? `${status.vox.currentLevel} dB` : "-∞ dB"}
+                  {voxDisplayDb} dB
                 </span>
               </div>
-              <div className="relative h-0.5">
-                <div className="absolute top-0 w-px h-2 bg-foreground/40 -translate-y-3" style={{ left: `${Math.max(0, Math.min(100, ((voxConfig.threshold + 60) / 50) * 100))}%` }} title={`Threshold: ${voxConfig.threshold} dB`} />
-              </div>
-              {(status.vox.state === "recording" || status.vox.state === "tail_silence") && (
+              {voxConfigLoaded && (
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <div className="w-2.5 h-0.5 bg-amber-500 rounded-full" />
+                  <span>Threshold {voxConfig.threshold} dB</span>
+                </div>
+              )}
+              {(vox.state === "recording" || vox.state === "tail_silence") && (
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  {status.vox.recordingFilename && <span className="font-mono truncate">{status.vox.recordingFilename}</span>}
-                  <span className="font-mono tabular-nums ml-auto">{formatDuration(interpolatedDuration)}</span>
+                  {vox.recordingFilename && <span className="font-mono truncate">{vox.recordingFilename}</span>}
+                  <div className="flex items-center gap-1.5 ml-auto">
+                    <span className="font-mono tabular-nums">{formatDuration(interpolatedDuration)}</span>
+                    <span className="text-muted-foreground/40">|</span>
+                    <button
+                      className="text-[10px] font-medium text-amber-500 hover:text-amber-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer inline-flex items-center gap-1"
+                      disabled={voxStopSaving}
+                      onClick={async () => {
+                        setVoxStopSaving(true);
+                        try {
+                          await fetch("/api/vox/stop-recording", { method: "POST" });
+                        } catch {
+                          setVoxStopSaving(false);
+                        }
+                      }}
+                    >
+                      {voxStopSaving && <Loader2 className="h-2.5 w-2.5 animate-spin" />}
+                      {voxStopSaving ? "Saving..." : "Stop & Save"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
